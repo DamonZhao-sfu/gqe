@@ -1,0 +1,48 @@
+## Conda environment for BUILDING and RUNNING the cudf (libcudf) C++
+## TPC-H / NDS-H benchmarks from source.
+##
+## IMPORTANT: libcudf's exact build dependencies are version-sensitive and
+## are maintained inside the cudf repo itself at:
+##     cudf/conda/environments/all_cuda-129_arch-x86_64.yaml
+## tpch_bench/cudf/build_cudf_ndsh.sh will PREFER that bundled file if the
+## cudf checkout is present, and only fall back to this one. Treat this file
+## as a convenience baseline, not the source of truth.
+##
+## Create with:
+##   mamba env create -f cudf-env.yml
+##   conda activate cudf-bench
+name: cudf-bench
+channels:
+  - rapidsai
+  - conda-forge
+  - nvidia
+dependencies:
+  - python=3.12
+  - cuda-version=12.9
+  - cuda-nvcc
+  - cuda-cudart-dev
+  - cuda-nvrtc-dev
+  - cuda-nvtx-dev
+  - cuda-cccl
+  - cuda-command-line-tools
+  - cmake>=3.30
+  - ninja
+  - c-compiler
+  - cxx-compiler
+  - gcc_linux-64=13.*
+  - sysroot_linux-64==2.28
+  - rapids-build-backend>=0.3
+  - librmm==25.10.*
+  - rmm==25.10.*
+  - libkvikio==25.10.*
+  - nvcomp>=4.0
+  - dlpack>=0.8
+  - flatbuffers
+  - spdlog>=1.14
+  - fmt>=11
+  - zlib
+  - nvbench
+  # data generation + result inspection
+  - python-duckdb
+  - pyarrow
+  - pandas

@@ -1,0 +1,62 @@
+## Conda environment for BUILDING and RUNNING GQE.
+##
+## This mirrors gqe/conda/docker-x86_64.yml (the authoritative list the
+## project's Dockerfile uses). Note: libcudf (branch-25.10) and, if you
+## enable the query compiler, LLVM/MLIR 20.1.2 are NOT conda packages here
+## -- they are built from source by tpch_bench/gqe/build_gqe.sh, exactly as
+## the upstream Dockerfile does.
+##
+## Create with:
+##   mamba env create -f gqe-env.yml      # (or: conda env create -f ...)
+##   conda activate gqe
+name: gqe
+channels:
+  - rapidsai
+  - conda-forge
+  - nvidia
+dependencies:
+  - libxml2<2.14
+  - libnuma
+  - numactl
+  - rust
+  - python=3.12
+  - cuda-cccl
+  - cuda-cudart
+  - cuda-cudart-dev
+  - cuda-cupti
+  - cuda-cupti-dev
+  - cuda-nvcc
+  - cuda-nvml-dev
+  - cuda-nvrtc-dev
+  - cuda-nvtx-dev
+  - cuda-version=12.9
+  - cuda-command-line-tools
+  - cmake
+  - ninja
+  - c-compiler
+  - cxx-compiler
+  - conda-pack
+  - clang-tools=20.1.4
+  - gcc_linux-64=14.*
+  - sysroot_linux-64==2.28
+  - libprotobuf=4.*
+  - pandas
+  - pyarrow=16.1.0
+  - pybind11=2.13.6
+  - thrift-compiler=0.19
+  - libthrift=0.19
+  - zlib>=1.2.13
+  - libnvcomp-dev==5.2.0.10
+  - libnvjitlink-dev
+  - liburing
+  - libnvshmem-static==3.2.5
+  - spdlog=1.15.3
+  - fmt=11.1.4
+  - tbb-devel
+  - libboost-devel=1.87.0
+  - pre-commit
+  - uv=0.10.4
+  - nccl
+  # extras used by the data-generation helper in tpch_bench/common
+  - python-duckdb
+  - netcat
