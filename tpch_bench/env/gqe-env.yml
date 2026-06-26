@@ -59,4 +59,3 @@ dependencies:
   - nccl
   # extras used by the data-generation helper in tpch_bench/common
   - python-duckdb
-  - netcat
