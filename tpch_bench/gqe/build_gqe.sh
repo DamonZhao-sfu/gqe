@@ -40,9 +40,11 @@ if [[ ! -d "$CUDF_SRC/.git" ]]; then
 fi
 pushd "$CUDF_SRC" >/dev/null
 # --ptds (per-thread default stream) is required by GQE for H2D/compute overlap.
+# NOTE: cudf's build.sh greps for the literal quotes in --cmake-args="...", so the
+# whole token is single-quoted here to keep the inner double-quotes intact.
 CUDF_CMAKE_CUDA_ARCHITECTURES="$CUDA_ARCH" \
   ./build.sh libcudf --ptds \
-  --cmake-args=" -DCUDF_ENABLE_ARROW_S3=OFF -DBUILD_BENCHMARKS=OFF -DCUDA_ENABLE_LINEINFO=ON "
+  '--cmake-args="-DCUDF_ENABLE_ARROW_S3=OFF -DBUILD_BENCHMARKS=OFF -DCUDA_ENABLE_LINEINFO=ON"'
 popd >/dev/null
 
 echo "==> [2/3] Configure + build GQE (compiler=$ENABLE_COMPILER)"
