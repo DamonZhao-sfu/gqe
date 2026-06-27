@@ -61,16 +61,17 @@ conda install -y -c rapidsai -c conda-forge -c nvidia \
   "libcudf=${RAPIDS_VERSION}" "librmm=${RAPIDS_VERSION}" "libkvikio=${RAPIDS_VERSION}" \
   "cuda-version=12.9" libnvjitlink-dev libcufile-dev
 
-# gqe vendors its own nvcomp 5.2 (cmake/nvcomp.cmake) with an extended manager API. Any conda
-# nvcomp *dev headers* under $CONDA_PREFIX/include/nvcomp clash with it (multiple definition /
-# wrong API: missing nvcompBitshuffleMode_t, different decompress signature). Remove just the
-# headers package -- the conda nvcomp runtime lib that libcudf needs stays installed.
-echo "    removing conda nvcomp dev headers (gqe uses its own vendored nvcomp 5.2)"
-conda remove -y --force-remove libnvcomp-dev 2>/dev/null || true
+# gqe vendors its OWN nvcomp 5.2 (cmake/nvcomp.cmake) with an extended manager API + CPU
+# compressors (nvcomp::nvcomp_cpu). A conda nvcomp clashes both at compile time (header
+# redefinition / wrong decompress signature) AND at run time (the loader resolves nvcomp symbols
+# such as nvcomp::LZ4CPUManager to the conda lib, which lacks them -> "undefined symbol").
+# Remove the conda nvcomp entirely; gqe's vendored libnvcomp.so.5 (same SONAME) serves both gqe
+# and the prebuilt libcudf at runtime. (Run scripts add gqe's nvcomp dir to LD_LIBRARY_PATH.)
+echo "    removing conda nvcomp so gqe's vendored nvcomp 5.2 is the only one"
+conda remove -y --force-remove libnvcomp libnvcomp-dev 2>/dev/null || true
 if [[ -e "$CONDA_PREFIX/include/nvcomp/nvcompManager.hpp" ]]; then
   echo "    WARNING: conda nvcomp headers still present at $CONDA_PREFIX/include/nvcomp;" >&2
-  echo "             the gqe build may clash. Identify the owning pkg with:" >&2
-  echo "               conda list | grep -i nvcomp" >&2
+  echo "             find the owning pkg with: conda list | grep -i nvcomp" >&2
 fi
 
 echo "==> [2/3] Configure + build the gqe library/benchmarks (compiler=$ENABLE_COMPILER)"

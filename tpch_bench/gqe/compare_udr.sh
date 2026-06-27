@@ -24,6 +24,11 @@ set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 GQE_SRC="${GQE_SRC:-$(cd "$HERE/../.." && pwd)}"
 BIN_DIR="${BIN_DIR:-$GQE_SRC/build/benchmark}"
+
+# Make gqe's vendored nvcomp (5.2) resolvable at runtime (build-tree binaries lack it on RPATH).
+_nvc="$(find "$GQE_SRC/build" -name 'libnvcomp.so*' 2>/dev/null | head -1)"
+[[ -n "$_nvc" ]] && export LD_LIBRARY_PATH="$(dirname "$_nvc")${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+
 RUNS="${RUNS:-5}"
 WARMUP="${WARMUP:-1}"
 export GQE_LOG_LEVEL="${GQE_LOG_LEVEL:-info}"  # ensure the timing line is emitted
