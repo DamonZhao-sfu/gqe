@@ -49,7 +49,7 @@ fi
 
 echo "==> [1/3] Build libcudf from source (branch-25.10) into $CUDF_SRC"
 if [[ ! -d "$CUDF_SRC/.git" ]]; then
-  git clone --branch branch-25.10 --depth 1 https://github.com/rapidsai/cudf.git "$CUDF_SRC"
+  git clone --depth 1 https://github.com/rapidsai/cudf.git "$CUDF_SRC"
 fi
 
 # Install nvcomp 5.0.x ONLY for the libcudf build, then remove it so it can't
