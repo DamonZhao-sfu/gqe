@@ -52,6 +52,11 @@ add_executable(q43 hardcoded/q43.cpp)
 target_include_directories(q43 PUBLIC ${CMAKE_SOURCE_DIR}/include)
 target_link_libraries(q43 PUBLIC gqe)
 
+add_executable(q43_udr hardcoded/q43_udr.cu)
+target_include_directories(q43_udr PUBLIC ${CMAKE_SOURCE_DIR}/include)
+target_link_libraries(q43_udr PUBLIC gqe)
+target_link_libraries(q43_udr PUBLIC cuco::cuco)
+
 add_executable(q48 hardcoded/q48.cpp)
 target_include_directories(q48 PUBLIC ${CMAKE_SOURCE_DIR}/include)
 target_link_libraries(q48 PUBLIC gqe)

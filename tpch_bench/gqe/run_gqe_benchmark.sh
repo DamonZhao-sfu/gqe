@@ -26,7 +26,7 @@ BIN_DIR="${BIN_DIR:-$GQE_SRC/build/benchmark}"
 
 # query-number -> binary name. The fused-kernel variants q3_udr / q7_udr can be
 # selected by their full name, e.g. `run_gqe_benchmark.sh <data> q3_udr q7_udr`.
-ALL=(q3 q6 q7 q22 q38 q43 q48 q3_udr q7_udr)
+ALL=(q3 q6 q7 q22 q38 q43 q48 q3_udr q7_udr q43_udr)
 
 DATA_DIR="${1:?usage: run_gqe_benchmark.sh <tpcds_dataset_dir> <query|udr|all> [more...]}"
 shift
