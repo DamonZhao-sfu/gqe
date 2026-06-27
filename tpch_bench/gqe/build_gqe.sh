@@ -47,14 +47,30 @@ if [[ -z "${CONDA_PREFIX:-}" ]]; then
   exit 1
 fi
 
+# Conda puts the CUDA toolkit headers/libs under targets/<arch>-linux/ rather than the env root.
+# Current libcudf (branch-25.10) has a runtime-compilation component (librtcx) that needs
+# nvJitLink.h, so make those dirs visible to the compiler/linker.
+_arch_triplet="$(uname -m)-linux"
+if [[ -d "$CONDA_PREFIX/targets/$_arch_triplet/include" ]]; then
+  export CPATH="$CONDA_PREFIX/targets/$_arch_triplet/include${CPATH:+:$CPATH}"
+  export LIBRARY_PATH="$CONDA_PREFIX/targets/$_arch_triplet/lib${LIBRARY_PATH:+:$LIBRARY_PATH}"
+fi
+export CPATH="$CONDA_PREFIX/include${CPATH:+:$CPATH}"
+
 echo "==> [1/3] Build libcudf from source (branch-25.10) into $CUDF_SRC"
 if [[ ! -d "$CUDF_SRC/.git" ]]; then
   git clone --branch branch-25.10 --depth 1 https://github.com/rapidsai/cudf.git "$CUDF_SRC"
 fi
 
+# Ensure nvJitLink dev headers (nvJitLink.h) are present for libcudf's librtcx component.
+# (Kept after the build -- only nvcomp is removed below.)
+echo "    ensuring libnvjitlink-dev is installed"
+conda install -y -c rapidsai -c conda-forge -c nvidia libnvjitlink-dev
+
 # Install nvcomp 5.0.x ONLY for the libcudf build, then remove it so it can't
 # shadow the nvcomp 5.2 that GQE fetches itself (cmake/nvcomp.cmake). Mirrors
-# gqe/Dockerfile. If a newer nvcomp is already present it gets downgraded.
+# gqe/Dockerfile. (Note: current cudf actually fetches its own proprietary nvcomp,
+# so this is mostly belt-and-suspenders.) If a newer nvcomp is present it is downgraded.
 echo "    installing nvcomp $CUDF_NVCOMP_VERSION for the libcudf build"
 # Pass channels explicitly: `conda install` uses the global channel config
 # (often just `defaults`), not the channels listed in the env's yml.
