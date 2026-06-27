@@ -1,0 +1,6 @@
+# Python bytecode caches from the helper scripts
+__pycache__/
+*.pyc
+
+# Local benchmark artifacts
+udr_results/
