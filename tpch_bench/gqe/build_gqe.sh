@@ -46,7 +46,10 @@ fi
 # shadow the nvcomp 5.2 that GQE fetches itself (cmake/nvcomp.cmake). Mirrors
 # gqe/Dockerfile. If a newer nvcomp is already present it gets downgraded.
 echo "    installing nvcomp $CUDF_NVCOMP_VERSION for the libcudf build"
-conda install -y "libnvcomp-dev=$CUDF_NVCOMP_VERSION"
+# Pass channels explicitly: `conda install` uses the global channel config
+# (often just `defaults`), not the channels listed in the env's yml.
+conda install -y -c rapidsai -c conda-forge -c nvidia \
+  "libnvcomp-dev=$CUDF_NVCOMP_VERSION"
 
 pushd "$CUDF_SRC" >/dev/null
 # --ptds (per-thread default stream) is required by GQE for H2D/compute overlap.
