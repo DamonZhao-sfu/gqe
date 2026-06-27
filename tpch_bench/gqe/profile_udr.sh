@@ -25,10 +25,26 @@ BIN_DIR="${BIN_DIR:-$GQE_SRC/build/benchmark}"
 OUTDIR="${OUTDIR:-$PWD/udr_profiles}"
 export GQE_LOG_LEVEL="${GQE_LOG_LEVEL:-warn}"
 
-if ! command -v nsys >/dev/null 2>&1; then
-  echo "ERROR: nsys not found. Install with: conda install -c nvidia nsight-systems" >&2
+# Locate nsys: PATH, env var, conda, or a system CUDA / Nsight install.
+NSYS="${NSYS:-}"
+if [[ -z "$NSYS" ]]; then
+  if command -v nsys >/dev/null 2>&1; then
+    NSYS="$(command -v nsys)"
+  else
+    for c in "$CONDA_PREFIX/bin/nsys" /usr/local/cuda*/bin/nsys \
+             /opt/nvidia/nsight-systems/*/bin/nsys /usr/local/bin/nsys; do
+      [[ -x "$c" ]] && { NSYS="$c"; break; }
+    done
+  fi
+fi
+if [[ -z "$NSYS" ]]; then
+  echo "ERROR: nsys (Nsight Systems) not found. Options:" >&2
+  echo "  - conda install -c nvidia nsight-systems" >&2
+  echo "  - or point NSYS=/path/to/nsys ./profile_udr.sh ..." >&2
+  echo "  (if you can't install nsys, use compare_udr.sh on a bigger dataset instead.)" >&2
   exit 1
 fi
+echo "==> using nsys: $NSYS"
 
 # gqe's vendored nvcomp on the loader path (build-tree binaries lack it on RPATH).
 while IFS= read -r _so; do
@@ -57,9 +73,9 @@ WORK="$(mktemp -d)"; trap 'rm -rf "$WORK"' EXIT
 # Profile $1 (binary) into report $2; echo total GPU kernel time in ns.
 kernel_ns() {
   local bin="$1" rep="$2"
-  ( cd "$WORK" && nsys profile -t cuda --sample=none --force-overwrite true \
+  ( cd "$WORK" && "$NSYS" profile -t cuda --sample=none --force-overwrite true \
       -o "$rep" "$bin" "$DATA_DIR" >/dev/null 2>&1 ) || { echo 0; return; }
-  nsys stats --report cuda_gpu_kern_sum --format csv "$rep.nsys-rep" 2>/dev/null | python3 -c '
+  "$NSYS" stats --report cuda_gpu_kern_sum --format csv "$rep.nsys-rep" 2>/dev/null | python3 -c '
 import sys, csv
 rows = list(csv.reader(sys.stdin))
 hi = next((i for i,r in enumerate(rows) if "Total Time (ns)" in r), None)
