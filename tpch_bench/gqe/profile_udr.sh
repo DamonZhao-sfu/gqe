@@ -70,24 +70,35 @@ fi
 mkdir -p "$OUTDIR"
 WORK="$(mktemp -d)"; trap 'rm -rf "$WORK"' EXIT
 
-# Profile $1 (binary) into report $2; echo total GPU kernel time in ns.
+# Profile $1 (binary) into report $2; echo total GPU kernel time in ns. Never aborts the script:
+# any failure (profiling blocked, unknown report name, etc.) yields 0.
+LAST_NSYS_ERR=""
 kernel_ns() {
-  local bin="$1" rep="$2"
-  ( cd "$WORK" && "$NSYS" profile -t cuda --sample=none --force-overwrite true \
-      -o "$rep" "$bin" "$DATA_DIR" >/dev/null 2>&1 ) || { echo 0; return; }
-  "$NSYS" stats --report cuda_gpu_kern_sum --format csv "$rep.nsys-rep" 2>/dev/null | python3 -c '
+  local bin="$1" rep="$2" csv="" report
+  if ! ( cd "$WORK" && "$NSYS" profile -t cuda --sample=none --force-overwrite true \
+           -o "$rep" "$bin" "$DATA_DIR" ) >"$WORK/nsys.log" 2>&1; then
+    LAST_NSYS_ERR="$(tail -3 "$WORK/nsys.log")"; echo 0; return 0
+  fi
+  # Report name differs across nsys versions: cuda_gpu_kern_sum (new) vs gpukernsum (old).
+  for report in cuda_gpu_kern_sum gpukernsum; do
+    csv="$("$NSYS" stats --report "$report" --format csv "$rep.nsys-rep" 2>/dev/null || true)"
+    [[ -n "$csv" ]] && break
+  done
+  if [[ -z "$csv" ]]; then LAST_NSYS_ERR="nsys stats produced no output"; echo 0; return 0; fi
+  printf '%s\n' "$csv" | python3 -c '
 import sys, csv
 rows = list(csv.reader(sys.stdin))
-hi = next((i for i,r in enumerate(rows) if "Total Time (ns)" in r), None)
+hi = next((i for i,r in enumerate(rows) if any("Total Time" in c for c in r)), None)
 if hi is None: print(0); sys.exit()
-col = rows[hi].index("Total Time (ns)")
+col = next((j for j,c in enumerate(rows[hi]) if c.strip().startswith("Total Time")), None)
+if col is None: print(0); sys.exit()
 tot = 0.0
 for r in rows[hi+1:]:
     if len(r) > col:
         try: tot += float(r[col].replace(",", "").strip())
         except ValueError: pass
 print(int(tot))
-'
+' 2>/dev/null || echo 0
 }
 
 printf '%-10s | %-16s | %-16s | %-8s | %-7s\n' \
@@ -106,6 +117,9 @@ for base in "${BASES[@]}"; do
     if (b>0 && a>0) printf "%.2f %.2f %.2fx %.1f%%", om, um, a/b, (1-b/a)*100;
     else printf "%.2f %.2f n/a n/a", om, um }')
   printf '%-10s | %-16s | %-16s | %-8s | %-7s\n' "$base" "$o_ms" "$u_ms" "$speedup" "$pct"
+  if [[ "$o_ns" == "0" && "$u_ns" == "0" ]]; then
+    echo "    (nsys could not extract kernel time; last error: ${LAST_NSYS_ERR:-unknown})" >&2
+  fi
 done
 
 echo
