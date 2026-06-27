@@ -71,35 +71,52 @@ fi
 mkdir -p "$OUTDIR"
 WORK="$(mktemp -d)"; trap 'rm -rf "$WORK"' EXIT
 
-# Profile $1 (binary) into report $2; echo total GPU kernel time in ns. Never aborts the script:
-# any failure (profiling blocked, unknown report name, etc.) yields 0.
+# Profile $1 (binary) into report base $2; echo total GPU kernel time in ns. Never aborts the
+# script: any failure yields 0. The raw nsys stats output is SAVED to <rep>.kernsum.txt so old
+# nsys CSV layouts can be inspected.
 LAST_NSYS_ERR=""
 kernel_ns() {
-  local bin="$1" rep="$2" csv="" report
+  local bin="$1" rep="$2" report repf="" out="$2.kernsum.txt"
   if ! ( cd "$WORK" && "$NSYS" profile -t cuda --sample=none --force-overwrite true \
            -o "$rep" "$bin" "$DATA_DIR" ) >"$WORK/nsys.log" 2>&1; then
-    LAST_NSYS_ERR="$(tail -3 "$WORK/nsys.log")"; echo 0; return 0
+    LAST_NSYS_ERR="profile failed: $(tail -2 "$WORK/nsys.log")"; echo 0; return 0
   fi
-  # Report name differs across nsys versions: cuda_gpu_kern_sum (new) vs gpukernsum (old).
+  # Report file: .nsys-rep (new) or .qdrep (old nsys).
+  for ext in nsys-rep qdrep; do [[ -f "$rep.$ext" ]] && { repf="$rep.$ext"; break; }; done
+  if [[ -z "$repf" ]]; then LAST_NSYS_ERR="no report file at $rep.{nsys-rep,qdrep}"; echo 0; return 0; fi
+  # Report name differs across versions: cuda_gpu_kern_sum (new) vs gpukernsum (old).
+  : > "$out"
   for report in cuda_gpu_kern_sum gpukernsum; do
-    csv="$("$NSYS" stats --report "$report" --format csv "$rep.nsys-rep" 2>/dev/null || true)"
-    [[ -n "$csv" ]] && break
+    "$NSYS" stats --report "$report" --format csv "$repf" >"$out" 2>"$WORK/stats.err" || true
+    [[ -s "$out" ]] && break
   done
-  if [[ -z "$csv" ]]; then LAST_NSYS_ERR="nsys stats produced no output"; echo 0; return 0; fi
-  printf '%s\n' "$csv" | python3 -c '
+  if [[ ! -s "$out" ]]; then
+    LAST_NSYS_ERR="nsys stats produced no output ($(tail -1 "$WORK/stats.err" 2>/dev/null))"
+    echo 0; return 0
+  fi
+  local ns
+  ns=$(python3 - "$out" <<'PY' 2>/dev/null || echo 0
 import sys, csv
-rows = list(csv.reader(sys.stdin))
-hi = next((i for i,r in enumerate(rows) if any("Total Time" in c for c in r)), None)
+rows = list(csv.reader(open(sys.argv[1], newline="")))
+hi = ci = None
+for i, r in enumerate(rows):           # find the header row + the "total time" column (any version)
+    for j, c in enumerate(r):
+        if "total time" in c.strip().lower():
+            hi, ci = i, j; break
+    if hi is not None: break
 if hi is None: print(0); sys.exit()
-col = next((j for j,c in enumerate(rows[hi]) if c.strip().startswith("Total Time")), None)
-if col is None: print(0); sys.exit()
 tot = 0.0
-for r in rows[hi+1:]:
-    if len(r) > col:
-        try: tot += float(r[col].replace(",", "").strip())
+for r in rows[hi + 1:]:
+    if len(r) > ci:
+        try: tot += float(r[ci].replace(",", "").strip())
         except ValueError: pass
 print(int(tot))
-' 2>/dev/null || echo 0
+PY
+)
+  if [[ -z "$ns" || "$ns" == "0" ]]; then
+    LAST_NSYS_ERR="couldn't parse kernel time; inspect raw output: $out"
+  fi
+  echo "${ns:-0}"
 }
 
 echo "query,orig_kernel_ms,udr_kernel_ms,speedup,pct_faster" > "$CSV_OUT"
