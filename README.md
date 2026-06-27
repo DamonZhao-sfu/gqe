@@ -210,5 +210,9 @@ Optional components, each guarded by its own CMake flag. See the linked docs for
 conda env create -f /localhome/hza214/gqe/tpch_bench/env/gqe-env.yml
 conda activate gqe
 bash /localhome/hza214/gqe/tpch_bench/gqe/build_gqe.sh
-bash /localhome/hza214/gqe/build/benchmark/q3 tpcds_sf1/
+/localhome/hza214/gqe/build/benchmark/q3 tpcds_sf1/
+
+./tpch_bench/gqe/verify_udr.sh /localhome/hza214/gqe/tpcds_sf20 q3 q7 q43
+./tpch_bench/gqe/compare_udr.sh /localhome/hza214/gqe/tpcds_sf20 q3 q7 q43
+NSYS=/opt/nvidia/nsight-systems/2026.3.1/target-linux-x64/nsys ./tpch_bench/gqe/profile_udr.sh /localhome/hza214/gqe/tpcds_sf20 q3 q7 q43
 ```
