@@ -33,6 +33,7 @@ done < <(find "$GQE_SRC/build" -name 'libnvcomp*.so*' 2>/dev/null)
 
 RUNS="${RUNS:-5}"
 WARMUP="${WARMUP:-1}"
+CSV_OUT="${CSV_OUT:-$PWD/udr_compare.csv}"   # results also saved here
 export GQE_LOG_LEVEL="${GQE_LOG_LEVEL:-info}"  # ensure the timing line is emitted
 
 DATA_DIR="${1:?usage: compare_udr.sh <tpcds_dataset_dir> [base_query ...]}"
@@ -76,6 +77,8 @@ stats() {
   echo "$min $med"
 }
 
+echo "query,orig_min_ms,orig_med_ms,udr_min_ms,udr_med_ms,speedup,delta_min_ms,pct_faster" > "$CSV_OUT"
+
 printf '%-10s | %-16s | %-16s | %-8s | %-10s | %-7s\n' \
   "query" "orig min/med" "udr min/med" "speedup" "Δmin (ms)" "faster"
 printf -- '-----------+------------------+------------------+----------+------------+--------\n'
@@ -111,9 +114,11 @@ for base in "${BASES[@]}"; do
 
   printf '%-10s | %-16s | %-16s | %-8s | %-10s | %-7s\n' \
     "$base" "$o_min / $o_med" "$u_min / $u_med" "$speedup" "$delta" "$pct"
+  echo "$base,$o_min,$o_med,$u_min,$u_med,${speedup%x},$delta,${pct%\%}" >> "$CSV_OUT"
 done
 
 echo
+echo "Saved CSV: $CSV_OUT"
 echo "(min/median over $RUNS runs after $WARMUP warmup. speedup/Δmin/faster computed on the min.)"
 echo "NOTE: end-to-end time includes Parquet read, identical for both, so at small scale factors"
 echo "the join speedup is masked. To SEE the difference: use a bigger dataset (gen_tpcds_data.py"

@@ -16,3 +16,9 @@ compile_commands.json
 
 # Emacs directory configuration
 .dir-locals.el
+
+# tpch_bench local benchmark artifacts (compare/profile/verify outputs)
+/udr_compare.csv
+/udr_profile.csv
+/udr_results/
+/udr_profiles/
