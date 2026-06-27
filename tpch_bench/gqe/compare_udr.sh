@@ -75,8 +75,9 @@ stats() {
   echo "$min $med"
 }
 
-printf '%-10s | %-18s | %-18s | %-8s\n' "query" "orig min/med (ms)" "udr min/med (ms)" "speedup"
-printf -- '-----------+--------------------+--------------------+---------\n'
+printf '%-10s | %-16s | %-16s | %-8s | %-10s | %-7s\n' \
+  "query" "orig min/med" "udr min/med" "speedup" "Δmin (ms)" "faster"
+printf -- '-----------+------------------+------------------+----------+------------+--------\n'
 
 for base in "${BASES[@]}"; do
   bin_o="$BIN_DIR/$base"; bin_u="$BIN_DIR/${base}_udr"
@@ -92,14 +93,16 @@ for base in "${BASES[@]}"; do
 
   read -r o_min o_med < <(stats "${o_times[@]}")
   read -r u_min u_med < <(stats "${u_times[@]}")
-  # speedup on the min (best) times
-  speedup=$(awk -v a="$o_min" -v b="$u_min" 'BEGIN{ if(b>0) printf "%.2fx", a/b; else print "n/a" }')
+  # speedup / absolute saving / percent faster, all on the min (best) times
+  read -r speedup delta pct < <(awk -v a="$o_min" -v b="$u_min" 'BEGIN{
+    if (b>0) printf "%.2fx %d %.1f%%", a/b, a-b, (1-b/a)*100; else print "n/a n/a n/a" }')
 
-  printf '%-10s | %-18s | %-18s | %-8s\n' \
-    "$base" "$o_min / $o_med" "$u_min / $u_med" "$speedup"
+  printf '%-10s | %-16s | %-16s | %-8s | %-10s | %-7s\n' \
+    "$base" "$o_min / $o_med" "$u_min / $u_med" "$speedup" "$delta" "$pct"
 done
 
 echo
-echo "(min/median over $RUNS runs after $WARMUP warmup; 'speedup' = orig_min / udr_min.)"
-echo "Note: times include Parquet read + result write, identical for both, so the delta"
-echo "reflects the join strategy. For pure kernel time, profile with nsys."
+echo "(min/median over $RUNS runs after $WARMUP warmup. speedup/Δmin/faster computed on the min.)"
+echo "NOTE: end-to-end time includes Parquet read, identical for both, so at small scale factors"
+echo "the join speedup is masked. To SEE the difference: use a bigger dataset (gen_tpcds_data.py"
+echo "--sf 100), and/or isolate GPU kernel time with: tpch_bench/gqe/profile_udr.sh <data> <base>"
