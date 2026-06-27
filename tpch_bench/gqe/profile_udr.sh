@@ -23,6 +23,7 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 GQE_SRC="${GQE_SRC:-$(cd "$HERE/../.." && pwd)}"
 BIN_DIR="${BIN_DIR:-$GQE_SRC/build/benchmark}"
 OUTDIR="${OUTDIR:-$PWD/udr_profiles}"
+CSV_OUT="${CSV_OUT:-$PWD/udr_profile.csv}"   # kernel-time results also saved here
 export GQE_LOG_LEVEL="${GQE_LOG_LEVEL:-warn}"
 
 # Locate nsys: PATH, env var, conda, or a system CUDA / Nsight install.
@@ -101,6 +102,8 @@ print(int(tot))
 ' 2>/dev/null || echo 0
 }
 
+echo "query,orig_kernel_ms,udr_kernel_ms,speedup,pct_faster" > "$CSV_OUT"
+
 printf '%-10s | %-16s | %-16s | %-8s | %-7s\n' \
   "query" "orig kern (ms)" "udr kern (ms)" "speedup" "faster"
 printf -- '-----------+------------------+------------------+----------+--------\n'
@@ -117,11 +120,13 @@ for base in "${BASES[@]}"; do
     if (b>0 && a>0) printf "%.2f %.2f %.2fx %.1f%%", om, um, a/b, (1-b/a)*100;
     else printf "%.2f %.2f n/a n/a", om, um }')
   printf '%-10s | %-16s | %-16s | %-8s | %-7s\n' "$base" "$o_ms" "$u_ms" "$speedup" "$pct"
+  echo "$base,$o_ms,$u_ms,${speedup%x},${pct%\%}" >> "$CSV_OUT"
   if [[ "$o_ns" == "0" && "$u_ns" == "0" ]]; then
     echo "    (nsys could not extract kernel time; last error: ${LAST_NSYS_ERR:-unknown})" >&2
   fi
 done
 
 echo
+echo "Saved CSV: $CSV_OUT"
 echo "Total GPU kernel time (sum over all CUDA kernels), I/O excluded. Reports saved in $OUTDIR/"
 echo "(*.nsys-rep) -- open in the Nsight Systems GUI to see the per-kernel breakdown."
