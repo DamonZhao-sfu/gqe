@@ -54,15 +54,16 @@ fi
 WORK="$(mktemp -d)"        # binaries write output.parquet/bandwidth.json into CWD
 trap 'rm -rf "$WORK"' EXIT
 
-# Run one binary once; echo the elapsed milliseconds (engine time if logged, else wall clock).
+# Run one binary once; echo elapsed ms (engine time if logged, else wall clock). On failure,
+# stash the program output in LAST_ERR and return 1 (so callers can show WHY it failed).
+LAST_ERR=""
 run_once() {
-  local bin="$1"
-  local t0 t1 out ms
+  local bin="$1" t0 t1 out ms
   t0=$(date +%s%3N)
-  out=$(cd "$WORK" && "$bin" "$DATA_DIR" 2>&1) || { echo "FAIL"; return 1; }
+  if ! out=$(cd "$WORK" && "$bin" "$DATA_DIR" 2>&1); then LAST_ERR="$out"; return 1; fi
   t1=$(date +%s%3N)
   ms=$(printf '%s\n' "$out" | grep -oE 'Query execution time: [0-9]+' | grep -oE '[0-9]+' | tail -1 || true)
-  if [[ -z "$ms" ]]; then ms=$(( t1 - t0 )); fi   # fallback: wall clock
+  [[ -z "$ms" ]] && ms=$(( t1 - t0 ))   # fallback: wall clock
   echo "$ms"
 }
 
@@ -79,17 +80,28 @@ printf '%-10s | %-16s | %-16s | %-8s | %-10s | %-7s\n' \
   "query" "orig min/med" "udr min/med" "speedup" "Δmin (ms)" "faster"
 printf -- '-----------+------------------+------------------+----------+------------+--------\n'
 
+rc=0
 for base in "${BASES[@]}"; do
   bin_o="$BIN_DIR/$base"; bin_u="$BIN_DIR/${base}_udr"
   if [[ ! -x "$bin_o" || ! -x "$bin_u" ]]; then
-    echo "skip $base: missing $bin_o or $bin_u" >&2; continue
+    echo "skip $base: missing $bin_o or $bin_u" >&2; rc=1; continue
+  fi
+
+  # Smoke-test both binaries; if either fails to run, show the real error and skip (don't abort).
+  if ! run_once "$bin_o" >/dev/null; then
+    echo "skip $base: '$base' failed to run:" >&2
+    printf '%s\n' "$LAST_ERR" | tail -3 | sed 's/^/    /' >&2; rc=1; continue
+  fi
+  if ! run_once "$bin_u" >/dev/null; then
+    echo "skip $base: '${base}_udr' failed to run:" >&2
+    printf '%s\n' "$LAST_ERR" | tail -3 | sed 's/^/    /' >&2; rc=1; continue
   fi
 
   for _ in $(seq 1 "$WARMUP"); do run_once "$bin_o" >/dev/null || true; run_once "$bin_u" >/dev/null || true; done
 
   o_times=(); u_times=()
-  for _ in $(seq 1 "$RUNS"); do o_times+=("$(run_once "$bin_o")"); done
-  for _ in $(seq 1 "$RUNS"); do u_times+=("$(run_once "$bin_u")"); done
+  for _ in $(seq 1 "$RUNS"); do o_times+=("$(run_once "$bin_o" || echo 0)"); done
+  for _ in $(seq 1 "$RUNS"); do u_times+=("$(run_once "$bin_u" || echo 0)"); done
 
   read -r o_min o_med < <(stats "${o_times[@]}")
   read -r u_min u_med < <(stats "${u_times[@]}")
