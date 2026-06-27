@@ -28,6 +28,9 @@ CUDF_SRC="${CUDF_SRC:-$HOME/cudf}"
 CUDA_ARCH="${CUDA_ARCH:-80-real;90-real;100-real;120}"
 JOBS="${JOBS:-$(nproc)}"
 ENABLE_COMPILER="${ENABLE_COMPILER:-OFF}"
+# libcudf branch-25.10 must build against nvcomp 5.0.x (its nvcomp_adapter switch
+# predates 5.2 enums and cudf compiles with -Werror=switch). See gqe/Dockerfile.
+CUDF_NVCOMP_VERSION="${CUDF_NVCOMP_VERSION:-5.0.0.6}"
 
 if [[ -z "${CONDA_PREFIX:-}" ]]; then
   echo "ERROR: activate the gqe conda env first: conda activate gqe" >&2
@@ -38,6 +41,13 @@ echo "==> [1/3] Build libcudf from source (branch-25.10) into $CUDF_SRC"
 if [[ ! -d "$CUDF_SRC/.git" ]]; then
   git clone --branch branch-25.10 --depth 1 https://github.com/rapidsai/cudf.git "$CUDF_SRC"
 fi
+
+# Install nvcomp 5.0.x ONLY for the libcudf build, then remove it so it can't
+# shadow the nvcomp 5.2 that GQE fetches itself (cmake/nvcomp.cmake). Mirrors
+# gqe/Dockerfile. If a newer nvcomp is already present it gets downgraded.
+echo "    installing nvcomp $CUDF_NVCOMP_VERSION for the libcudf build"
+conda install -y "libnvcomp-dev=$CUDF_NVCOMP_VERSION"
+
 pushd "$CUDF_SRC" >/dev/null
 # --ptds (per-thread default stream) is required by GQE for H2D/compute overlap.
 # NOTE: cudf's build.sh greps for the literal quotes in --cmake-args="...", so the
@@ -46,6 +56,9 @@ CUDF_CMAKE_CUDA_ARCHITECTURES="$CUDA_ARCH" \
   ./build.sh libcudf --ptds \
   '--cmake-args="-DCUDF_ENABLE_ARROW_S3=OFF -DBUILD_BENCHMARKS=OFF -DCUDA_ENABLE_LINEINFO=ON"'
 popd >/dev/null
+
+echo "    removing the temporary nvcomp (GQE will fetch its own 5.2)"
+conda remove -y libnvcomp-dev libnvcomp || true
 
 echo "==> [2/3] Configure + build GQE (compiler=$ENABLE_COMPILER)"
 BUILD_DIR="$GQE_SRC/build"

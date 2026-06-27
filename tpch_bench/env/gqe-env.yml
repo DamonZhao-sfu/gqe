@@ -46,7 +46,11 @@ dependencies:
   - thrift-compiler=0.19
   - libthrift=0.19
   - zlib>=1.2.13
-  - libnvcomp-dev==5.2.0.10
+  # NOTE: nvcomp is intentionally NOT installed here.
+  #  - libcudf (branch-25.10) must be compiled against nvcomp 5.0.x; build_gqe.sh
+  #    installs that temporarily and removes it afterwards.
+  #  - GQE itself fetches nvcomp 5.2 from NVIDIA's CDN via cmake/nvcomp.cmake
+  #    (public build), so a conda nvcomp would only shadow/conflict with it.
   - libnvjitlink-dev
   - liburing
   - libnvshmem-static==3.2.5
