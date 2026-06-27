@@ -26,8 +26,10 @@ GQE_SRC="${GQE_SRC:-$(cd "$HERE/../.." && pwd)}"
 BIN_DIR="${BIN_DIR:-$GQE_SRC/build/benchmark}"
 
 # Make gqe's vendored nvcomp (5.2) resolvable at runtime (build-tree binaries lack it on RPATH).
-_nvc="$(find "$GQE_SRC/build" -name 'libnvcomp.so*' 2>/dev/null | head -1)"
-[[ -n "$_nvc" ]] && export LD_LIBRARY_PATH="$(dirname "$_nvc")${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+while IFS= read -r _so; do
+  _d="$(dirname "$_so")"
+  case ":${LD_LIBRARY_PATH:-}:" in *":$_d:"*) ;; *) export LD_LIBRARY_PATH="$_d${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}";; esac
+done < <(find "$GQE_SRC/build" -name 'libnvcomp*.so*' 2>/dev/null)
 
 RUNS="${RUNS:-5}"
 WARMUP="${WARMUP:-1}"
