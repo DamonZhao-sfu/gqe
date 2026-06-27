@@ -76,12 +76,24 @@ conda remove -y libnvcomp-dev libnvcomp || true
 echo "==> [2/3] Configure + build GQE (compiler=$ENABLE_COMPILER)"
 BUILD_DIR="$GQE_SRC/build"
 mkdir -p "$BUILD_DIR"
+# Auto-use a compiler cache (speeds up repeated full builds), and let nvcc multi-thread its
+# per-arch passes. Tip: for a single-GPU box, CUDA_ARCH=native builds ~Nx faster than multi-arch.
+GQE_CACHE_ARGS=()
+if command -v sccache >/dev/null 2>&1; then
+  GQE_CACHE_ARGS=(-DCMAKE_CUDA_COMPILER_LAUNCHER=sccache -DCMAKE_CXX_COMPILER_LAUNCHER=sccache)
+  echo "    compiler cache: sccache"
+elif command -v ccache >/dev/null 2>&1; then
+  GQE_CACHE_ARGS=(-DCMAKE_CUDA_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache)
+  echo "    compiler cache: ccache"
+fi
 cmake -G Ninja -S "$GQE_SRC" -B "$BUILD_DIR" \
   -DCMAKE_BUILD_TYPE=Release \
   -DCMAKE_CUDA_ARCHITECTURES="$CUDA_ARCH" \
+  -DCMAKE_CUDA_FLAGS="--threads ${NVCC_THREADS:-0}" \
   -DGQE_ENABLE_CUSTOMIZED_PARQUET=ON \
   -DGQE_ENABLE_QUERY_COMPILER="$ENABLE_COMPILER" \
-  -DGQE_ENABLE_RUST_CLI=ON
+  -DGQE_ENABLE_RUST_CLI=ON \
+  "${GQE_CACHE_ARGS[@]}"
 cmake --build "$BUILD_DIR" -j "$JOBS"
 
 echo "==> [3/3] Build Rust gqe-cli"
