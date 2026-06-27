@@ -61,6 +61,18 @@ conda install -y -c rapidsai -c conda-forge -c nvidia \
   "libcudf=${RAPIDS_VERSION}" "librmm=${RAPIDS_VERSION}" "libkvikio=${RAPIDS_VERSION}" \
   "cuda-version=12.9" libnvjitlink-dev libcufile-dev
 
+# gqe vendors its own nvcomp 5.2 (cmake/nvcomp.cmake) with an extended manager API. Any conda
+# nvcomp *dev headers* under $CONDA_PREFIX/include/nvcomp clash with it (multiple definition /
+# wrong API: missing nvcompBitshuffleMode_t, different decompress signature). Remove just the
+# headers package -- the conda nvcomp runtime lib that libcudf needs stays installed.
+echo "    removing conda nvcomp dev headers (gqe uses its own vendored nvcomp 5.2)"
+conda remove -y --force-remove libnvcomp-dev 2>/dev/null || true
+if [[ -e "$CONDA_PREFIX/include/nvcomp/nvcompManager.hpp" ]]; then
+  echo "    WARNING: conda nvcomp headers still present at $CONDA_PREFIX/include/nvcomp;" >&2
+  echo "             the gqe build may clash. Identify the owning pkg with:" >&2
+  echo "               conda list | grep -i nvcomp" >&2
+fi
+
 echo "==> [2/3] Configure + build the gqe library/benchmarks (compiler=$ENABLE_COMPILER)"
 GQE_CACHE_ARGS=()
 if command -v sccache >/dev/null 2>&1; then
