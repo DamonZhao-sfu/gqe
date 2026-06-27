@@ -24,6 +24,12 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 GQE_SRC="${GQE_SRC:-$(cd "$HERE/../.." && pwd)}"
 BIN_DIR="${BIN_DIR:-$GQE_SRC/build/benchmark}"
 
+# The build-tree benchmark binaries don't carry gqe's vendored nvcomp (5.2) on their RPATH, so the
+# loader can otherwise resolve nvcomp symbols (e.g. nvcomp::LZ4CPUManager) to a different/conda
+# nvcomp -> "undefined symbol". Prepend gqe's vendored nvcomp lib dir to LD_LIBRARY_PATH.
+_nvc="$(find "$GQE_SRC/build" -name 'libnvcomp.so*' 2>/dev/null | head -1)"
+[[ -n "$_nvc" ]] && export LD_LIBRARY_PATH="$(dirname "$_nvc")${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+
 # query-number -> binary name. The fused-kernel variants q3_udr / q7_udr can be
 # selected by their full name, e.g. `run_gqe_benchmark.sh <data> q3_udr q7_udr`.
 ALL=(q3 q6 q7 q22 q38 q43 q48 q3_udr q7_udr q43_udr)
