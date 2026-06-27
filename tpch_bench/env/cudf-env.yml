@@ -41,7 +41,8 @@ dependencies:
   - spdlog>=1.14
   - fmt>=11
   - zlib
-  - nvbench
+  # NOTE: nvbench is NOT a conda package -- cudf's build fetches it via
+  # rapids-cmake/CPM when you build benchmarks, so it must not be listed here.
   # data generation + result inspection
   - python-duckdb
   - pyarrow
