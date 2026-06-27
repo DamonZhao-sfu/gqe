@@ -28,6 +28,16 @@ CUDF_SRC="${CUDF_SRC:-$HOME/cudf}"
 CUDA_ARCH="${CUDA_ARCH:-80-real;90-real;100-real;120}"
 JOBS="${JOBS:-$(nproc)}"
 ENABLE_COMPILER="${ENABLE_COMPILER:-OFF}"
+
+# Parallelism for ALL build stages:
+#  - CMAKE_GENERATOR=Ninja      -> cudf's build.sh and our cmake both use Ninja
+#  - CMAKE_BUILD_PARALLEL_LEVEL -> `cmake --build` uses $JOBS everywhere
+#  - PARALLEL_LEVEL             -> the knob cudf's build.sh reads
+#  - cargo gets -j "$JOBS" below
+export CMAKE_GENERATOR="Ninja"
+export CMAKE_BUILD_PARALLEL_LEVEL="$JOBS"
+export PARALLEL_LEVEL="$JOBS"
+echo "==> building with $JOBS parallel jobs (Ninja)"
 # libcudf branch-25.10 must build against nvcomp 5.0.x (its nvcomp_adapter switch
 # predates 5.2 enums and cudf compiles with -Werror=switch). See gqe/Dockerfile.
 CUDF_NVCOMP_VERSION="${CUDF_NVCOMP_VERSION:-5.0.0.6}"
@@ -55,7 +65,7 @@ pushd "$CUDF_SRC" >/dev/null
 # --ptds (per-thread default stream) is required by GQE for H2D/compute overlap.
 # NOTE: cudf's build.sh greps for the literal quotes in --cmake-args="...", so the
 # whole token is single-quoted here to keep the inner double-quotes intact.
-CUDF_CMAKE_CUDA_ARCHITECTURES="$CUDA_ARCH" \
+PARALLEL_LEVEL="$JOBS" CUDF_CMAKE_CUDA_ARCHITECTURES="$CUDA_ARCH" \
   ./build.sh libcudf --ptds \
   '--cmake-args="-DCUDF_ENABLE_ARROW_S3=OFF -DBUILD_BENCHMARKS=OFF -DCUDA_ENABLE_LINEINFO=ON"'
 popd >/dev/null
@@ -76,7 +86,7 @@ cmake --build "$BUILD_DIR" -j "$JOBS"
 
 echo "==> [3/3] Build Rust gqe-cli"
 pushd "$GQE_SRC/rust" >/dev/null
-cargo build --release -p gqe-cli
+cargo build --release -p gqe-cli -j "$JOBS"
 popd >/dev/null
 
 echo
