@@ -117,8 +117,8 @@ for base in "${BASES[@]}"; do
 
   read -r o_ms u_ms speedup pct < <(awk -v a="$o_ns" -v b="$u_ns" 'BEGIN{
     om=a/1e6; um=b/1e6;
-    if (b>0 && a>0) printf "%.2f %.2f %.2fx %.1f%%", om, um, a/b, (1-b/a)*100;
-    else printf "%.2f %.2f n/a n/a", om, um }')
+    if (b>0 && a>0) printf "%.2f %.2f %.2fx %.1f%%\n", om, um, a/b, (1-b/a)*100;
+    else printf "%.2f %.2f n/a n/a\n", om, um }') || true
   printf '%-10s | %-16s | %-16s | %-8s | %-7s\n' "$base" "$o_ms" "$u_ms" "$speedup" "$pct"
   echo "$base,$o_ms,$u_ms,${speedup%x},${pct%\%}" >> "$CSV_OUT"
   if [[ "$o_ns" == "0" && "$u_ns" == "0" ]]; then

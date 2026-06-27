@@ -110,7 +110,7 @@ for base in "${BASES[@]}"; do
   read -r u_min u_med < <(stats "${u_times[@]}")
   # speedup / absolute saving / percent faster, all on the min (best) times
   read -r speedup delta pct < <(awk -v a="$o_min" -v b="$u_min" 'BEGIN{
-    if (b>0) printf "%.2fx %d %.1f%%", a/b, a-b, (1-b/a)*100; else print "n/a n/a n/a" }')
+    if (b>0) printf "%.2fx %d %.1f%%\n", a/b, a-b, (1-b/a)*100; else print "n/a n/a n/a" }') || true
 
   printf '%-10s | %-16s | %-16s | %-8s | %-10s | %-7s\n' \
     "$base" "$o_min / $o_med" "$u_min / $u_med" "$speedup" "$delta" "$pct"
