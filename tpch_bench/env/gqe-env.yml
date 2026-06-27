@@ -52,6 +52,7 @@ dependencies:
   #  - GQE itself fetches nvcomp 5.2 from NVIDIA's CDN via cmake/nvcomp.cmake
   #    (public build), so a conda nvcomp would only shadow/conflict with it.
   - libnvjitlink-dev
+  - libcufile-dev          # cufile.h with batch/async APIs, needed by current kvikio
   - liburing
   - libnvshmem-static==3.2.5
   - spdlog=1.15.3

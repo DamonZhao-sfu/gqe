@@ -62,10 +62,13 @@ if [[ ! -d "$CUDF_SRC/.git" ]]; then
   git clone --branch branch-25.10 --depth 1 https://github.com/rapidsai/cudf.git "$CUDF_SRC"
 fi
 
-# Ensure nvJitLink dev headers (nvJitLink.h) are present for libcudf's librtcx component.
+# Ensure dev headers needed by current libcudf/kvikio are present:
+#  - nvJitLink.h  (librtcx runtime-compilation component)
+#  - cufile.h with batch/async APIs (kvikio's cuFile shim) -> libcufile-dev matched to CUDA 12.9
 # (Kept after the build -- only nvcomp is removed below.)
-echo "    ensuring libnvjitlink-dev is installed"
-conda install -y -c rapidsai -c conda-forge -c nvidia libnvjitlink-dev
+echo "    ensuring libnvjitlink-dev + libcufile-dev are installed"
+conda install -y -c rapidsai -c conda-forge -c nvidia \
+  libnvjitlink-dev libcufile-dev "cuda-version=12.9"
 
 # Install nvcomp 5.0.x ONLY for the libcudf build, then remove it so it can't
 # shadow the nvcomp 5.2 that GQE fetches itself (cmake/nvcomp.cmake). Mirrors
