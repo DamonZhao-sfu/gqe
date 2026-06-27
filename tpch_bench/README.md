@@ -22,13 +22,15 @@ generalizes to it more cheaply than writing 99 custom kernels.
 
 ```
 tpch_bench/
-  env/gqe-env.yml          conda env to build/run GQE
-  env/cudf-env.yml         conda env to build/run cudf TPC-H programs
-  common/gen_tpch_data.py  DuckDB -> Parquet + schema.sql + q*.sql
-  gqe/build_gqe.sh         build GQE (C++ engine + Rust gqe-cli)
-  gqe/run_gqe_tpch.sh      start server, load data, run query, stop
-  cudf/build_cudf_ndsh.sh  build libcudf + tpch examples / ndsh benchmarks
-  cudf/run_cudf_ndsh.sh    run cudf tpch_qN program(s)
+  env/gqe-env.yml           conda env to build/run GQE
+  env/cudf-env.yml          conda env to build/run cudf TPC-H programs
+  common/gen_tpch_data.py   DuckDB -> TPC-H Parquet + schema.sql + q*.sql
+  common/gen_tpcds_data.py  DuckDB -> TPC-DS Parquet + q*.sql
+  gqe/build_gqe.sh          build GQE (C++ engine + Rust gqe-cli)
+  gqe/run_gqe_tpch.sh       TPC-H via the SERVER path (start server, load, query)
+  gqe/run_gqe_benchmark.sh  TPC-DS via the standalone hardcoded benchmark programs
+  cudf/build_cudf_ndsh.sh   build libcudf + tpch examples / ndsh benchmarks
+  cudf/run_cudf_ndsh.sh     run cudf tpch_qN program(s)
 ```
 
 ## 1. Generate data (shared)
@@ -45,8 +47,24 @@ Produces `<outdir>/<table>/<table>.parquet`, `schema.sql`, and `queries/q*.sql`.
 ```bash
 mamba env create -f tpch_bench/env/gqe-env.yml && conda activate gqe
 ./tpch_bench/gqe/build_gqe.sh                       # builds libcudf + GQE + gqe-cli
+```
+
+GQE has two ways to run, on two different benchmarks:
+
+**(a) TPC-H, via the Flight SQL server path** (`scripts/load_tpch.py` + `run_tpch.py`):
+```bash
 ./tpch_bench/gqe/run_gqe_tpch.sh /data/tpch_sf1 1   # or: 1 6 14  | all
 ```
+
+**(b) TPC-DS, via the standalone hardcoded benchmark programs** (`benchmark/hardcoded/*`).
+These are ALL TPC-DS queries (q3, q6, q7, q22, q38, q43, q48, and q3_udr -- the
+custom-kernel variant of q3). They run in-process, no server:
+```bash
+python tpch_bench/common/gen_tpcds_data.py --sf 1 --outdir /data/tpcds_sf1
+./tpch_bench/gqe/run_gqe_benchmark.sh /data/tpcds_sf1 3       # or: 3 6 22 | udr | all
+```
+> Heads-up: the query NUMBERS here (3/6/7/22/38/43/48) are **TPC-DS** query
+> numbers, not TPC-H.
 
 ## 3. cudf
 
