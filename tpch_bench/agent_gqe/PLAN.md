@@ -1,7 +1,8 @@
 # Plan: Agent that generates GQE-hardcoded-style GPU code for TPC-DS
 
-Status: **PLAN ONLY — no implementation yet.** This documents the approach, the exact API the
-generator must emit, and the validation strategy. Implementation happens after review.
+Status: Phases 0-1 implemented (harness + name-based DSL + agent loop). The C++ is NOT
+compile-verified in this environment — expect to iterate on the GPU box. Phases 2-3 (set/rollup/
+window, UDR kernels) are future work.
 
 ## 1. Goal
 

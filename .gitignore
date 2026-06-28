@@ -23,3 +23,6 @@ compile_commands.json
 /udr_results/
 /udr_profiles/
 /tpch_bench/agent/agent_work/
+/tpch_bench/agent_gqe/agent_work/
+/tpch_bench/agent_gqe/solution_q*.cpp
+/tpcds_ref/
