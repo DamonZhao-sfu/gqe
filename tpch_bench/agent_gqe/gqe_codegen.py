@@ -215,16 +215,22 @@ def main():
             print(f"\n===== iteration {it}/{args.max_iters} =====")
             code = extract_cpp(chat(args.endpoint, model, messages, args.temperature))
             GEN_FILE.write_text(code)
+            (work / f"iter{it}_build_plan.cpp").write_text(code)  # keep every attempt
             messages.append({"role": "assistant", "content": f"```cpp\n{code}\n```"})
 
             ok, log = build()
             if not ok:
-                print("[agent] BUILD FAILED")
+                (work / f"iter{it}_build.log").write_text(log)
+                print("[agent] BUILD FAILED. Tail of compiler output:")
+                print("\n".join(log.splitlines()[-25:]))
+                print(f"[agent] full log: {work / f'iter{it}_build.log'}  code: {work / f'iter{it}_build_plan.cpp'}")
                 messages.append({"role": "user", "content": "Compilation failed. Fix it. Errors:\n" + tail(log)})
                 continue
             ok, log = run(work, args.data)
             if not ok:
-                print("[agent] RUNTIME FAILED")
+                (work / f"iter{it}_run.log").write_text(log)
+                print("[agent] RUNTIME FAILED:")
+                print("\n".join(log.splitlines()[-15:]))
                 messages.append({"role": "user", "content": "Compiled but crashed. Fix it. Output:\n" + tail(log)})
                 continue
             ok, detail = compare(work / "output.parquet", ref)
@@ -235,7 +241,13 @@ def main():
                 print(f"\n✅ SUCCESS iter {it}. Solution saved: {sol}")
                 return 0
             messages.append({"role": "user", "content": "Ran but wrong result vs SQL reference. Fix the plan. Diff:\n" + tail(detail)})
-        print(f"\n❌ did not converge in {args.max_iters} iters. Last attempt left in {GEN_FILE}")
+        last = work / f"last_attempt_q{args.query}.cpp"
+        last.write_text(GEN_FILE.read_text())
+        print(f"\n❌ did not converge in {args.max_iters} iters.")
+        print(f"   all attempts + logs: {work}/iter*  | last attempt: {last}")
+        print("   TIP: first confirm the harness itself compiles with the default Q3:")
+        print("        git checkout tpch_bench/agent_gqe/harness/build_plan_gen.cpp && \\")
+        print("        ./tpch_bench/gqe/build_query.sh gqe_codegen_query")
         return 1
     finally:
         if backup is not None:
