@@ -196,8 +196,11 @@ def run_sirius(home, data, sql, out):
         lines.append(f"CREATE OR REPLACE VIEW {name} AS SELECT * FROM read_parquet({files});")
     lines += [".timer on", f"COPY ({sql}) TO '{out}' (FORMAT parquet);"]
     script = "\n".join(lines) + "\n"
+    # Run with a clean library path so the conda (gqe) libs don't shadow Sirius's own (pixi) libs.
+    env = dict(os.environ)
+    env.pop("LD_LIBRARY_PATH", None)
     t0 = time.perf_counter()
-    p = subprocess.run([str(binp), "-unsigned"], input=script, capture_output=True, text=True)
+    p = subprocess.run([str(binp), "-unsigned"], input=script, capture_output=True, text=True, env=env)
     wall_ms = (time.perf_counter() - t0) * 1000.0
     m = re.search(r"real\s+([0-9.]+)", p.stdout + p.stderr)  # duckdb .timer: "Run Time (s): real X"
     ms = float(m.group(1)) * 1000.0 if m else wall_ms
