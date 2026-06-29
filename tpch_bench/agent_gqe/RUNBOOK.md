@@ -89,6 +89,17 @@ What it prints/saves:
 
 `--tpch` makes the generated `main` call `register_tpch(cat,data)`; otherwise `register_tpcds`.
 
+### DuckDB baseline threads (apples-to-apples)
+By default the DuckDB CPU baseline uses **all cores** (multi-threaded) — the hardest, production-style
+baseline (this is what **Sirius** compares against, at equal hardware rental cost). The
+specialization papers use a **single-threaded** DuckDB baseline to isolate specialization from
+parallelism (**BespokeOLAP**: DuckDB pinned to 1 core; **GenDB**: single-threaded, TPC-H SF10). To
+reproduce that weaker (and more favorable) baseline:
+```bash
+python tpch_bench/agent_gqe/gqe_codegen.py --query 4 --data /…/tpcds_sf1 --duckdb-threads 1
+```
+The timing line shows the thread count, e.g. `DuckDB (CPU, threads=1) …`.
+
 ### Forcing code-only output (reasoning models)
 Reasoning/distilled models emit `<think>…</think>` and prose. The agent already (a) strips think
 blocks, (b) takes the largest ```cpp block, (c) tolerates a truncated/unfenced reply. Extra knobs:

@@ -306,6 +306,8 @@ def main():
     ap.add_argument("--model", default=os.environ.get("VLLM_MODEL", ""))
     ap.add_argument("--max-iters", type=int, default=6)
     ap.add_argument("--temperature", type=float, default=0.2)
+    ap.add_argument("--duckdb-threads", dest="duckdb_threads", type=int, default=0,
+                    help="DuckDB CPU baseline threads (0=default/all cores; 1=single-thread like BespokeOLAP/GenDB)")
     ap.add_argument("--max-tokens", type=int, default=8192, help="LLM max output tokens (raise for whole-file)")
     ap.add_argument("--guided", action="store_true",
                     help="force the LLM output to be a single ```cpp block via vLLM guided decoding")
@@ -316,6 +318,9 @@ def main():
 
     # Inputs: data files -> database schema (views); SQL query.
     con, tables = duck(args.data)
+    if args.duckdb_threads and args.duckdb_threads > 0:
+        con.execute(f"SET threads={args.duckdb_threads}")
+    duckdb_threads = con.execute("SELECT current_setting('threads')").fetchone()[0]
     sql, label = resolve_sql(con, args)
     schemas = schemas_for(con, tables, sql)
     register_fn = "register_tpch" if args.tpch is not None else "register_tpcds"
@@ -333,7 +338,7 @@ def main():
     cpu_ms = (time.perf_counter() - t0) * 1000.0
     con.execute(f"COPY ({sql}) TO '{ref}' (FORMAT parquet)")
     show_parquet(ref, "DuckDB CPU output")
-    print(f"[time] DuckDB (CPU) query time: {cpu_ms:.1f} ms")
+    print(f"[time] DuckDB (CPU, threads={duckdb_threads}) query time: {cpu_ms:.1f} ms")
 
     # Optional external reference (e.g. a precomputed tpcds_ref dir).
     extra_ref = None
@@ -395,7 +400,7 @@ def main():
             show_parquet(work / "output.parquet", "GPU (gqe) output")
             speedup = (cpu_ms / gpu_ms) if gpu_ms else float("nan")
             sir = f"  |  Sirius (GPU) {sirius_ms:.1f} ms" if sirius_ms else ""
-            print(f"[time] DuckDB (CPU) {cpu_ms:.1f} ms  |  GPU (gqe) {gpu_ms:.1f} ms  "
+            print(f"[time] DuckDB (CPU, t={duckdb_threads}) {cpu_ms:.1f} ms  |  GPU (gqe) {gpu_ms:.1f} ms  "
                   f"|  speedup(vs CPU) {speedup:.2f}x{sir}")
             ok, detail = compare(work / "output.parquet", ref)
             print("[agent] vs DuckDB reference:", detail)
