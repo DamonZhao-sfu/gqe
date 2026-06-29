@@ -52,15 +52,30 @@ def pick_model(endpoint, model):
         sys.exit(f"--model not given and could not query {endpoint}/models ({e})")
 
 
-def chat(endpoint, model, messages, temperature):
-    r = http_json(f"{endpoint}/chat/completions",
-                  {"model": model, "messages": messages, "temperature": temperature,
-                   "max_tokens": 4096}, method="POST")
-    return r["choices"][0]["message"]["content"]
+def chat(endpoint, model, messages, temperature, max_tokens=8192, guided=False):
+    payload = {"model": model, "messages": messages, "temperature": temperature,
+               "max_tokens": max_tokens}
+    if guided:
+        # vLLM guided decoding: force the answer to be a single ```cpp ... ``` block.
+        payload["guided_regex"] = r"```cpp\n[\s\S]+\n```"
+    return http_json(f"{endpoint}/chat/completions", payload, method="POST")["choices"][0]["message"]["content"]
 
 
 def extract_cpp(text):
-    m = re.search(r"```(?:cpp|c\+\+)?\s*(.*?)```", text, re.S | re.I)
+    """Return ONLY the C++ source, even from reasoning models that emit prose / <think> blocks."""
+    # 1) drop chain-of-thought wrappers some reasoning models emit
+    text = re.sub(r"<think>.*?</think>", "", text, flags=re.S | re.I)
+    text = re.sub(r"<reasoning>.*?</reasoning>", "", text, flags=re.S | re.I)
+    # 2) prefer fenced code blocks; pick the LARGEST (the full program, not a snippet)
+    blocks = re.findall(r"```(?:cpp|c\+\+|cuda|c)?\s*(.*?)```", text, re.S | re.I)
+    if blocks:
+        return max(blocks, key=len).strip()
+    # 3) unclosed fence (truncated output): take everything after the opening fence
+    m = re.search(r"```(?:cpp|c\+\+|cuda|c)?\s*(.*)$", text, re.S | re.I)
+    if m:
+        return m.group(1).strip()
+    # 4) no fences at all: slice from the first #include to the end
+    m = re.search(r"(#include[\s\S]*)$", text)
     return (m.group(1) if m else text).strip()
 
 
@@ -141,11 +156,17 @@ def build():
 def run(workdir, data):
     binp = GQE_SRC / "build" / "benchmark" / "gqe_codegen_query"
     if not binp.exists():
-        return False, f"binary not found: {binp}"
+        return False, f"binary not found: {binp}", None
     env = nvcomp_ld(dict(os.environ))
-    env["GQE_LOG_LEVEL"] = env.get("GQE_LOG_LEVEL", "warn")
+    env["GQE_LOG_LEVEL"] = "info"  # so the "Query execution time: N ms." line is emitted
+    import time
+    t0 = time.perf_counter()
     p = subprocess.run([str(binp), str(data)], cwd=str(workdir), capture_output=True, text=True, env=env)
-    return p.returncode == 0, p.stdout + p.stderr
+    wall_ms = (time.perf_counter() - t0) * 1000.0
+    out = p.stdout + p.stderr
+    m = re.search(r"Query execution time:\s*([0-9]+)\s*ms", out)
+    gpu_ms = float(m.group(1)) if m else wall_ms  # engine time if logged, else wall clock
+    return p.returncode == 0, out, gpu_ms
 
 
 def compare(out, ref):
@@ -239,6 +260,9 @@ def main():
     ap.add_argument("--model", default=os.environ.get("VLLM_MODEL", ""))
     ap.add_argument("--max-iters", type=int, default=6)
     ap.add_argument("--temperature", type=float, default=0.2)
+    ap.add_argument("--max-tokens", type=int, default=8192, help="LLM max output tokens (raise for whole-file)")
+    ap.add_argument("--guided", action="store_true",
+                    help="force the LLM output to be a single ```cpp block via vLLM guided decoding")
     ap.add_argument("--workdir", default=str(HERE / "agent_work"))
     args = ap.parse_args()
 
@@ -257,8 +281,13 @@ def main():
     (work / f"{label}.input.schema.txt").write_text(schemas + "\n")
     ref = work / f"reference_{label}.parquet"
     print("[agent] computing DuckDB reference ...")
+    import time
+    t0 = time.perf_counter()
+    con.execute(f"SELECT count(*) FROM ({sql}) t").fetchall()  # CPU execution timing
+    cpu_ms = (time.perf_counter() - t0) * 1000.0
     con.execute(f"COPY ({sql}) TO '{ref}' (FORMAT parquet)")
     show_parquet(ref, "DuckDB CPU output")
+    print(f"[time] DuckDB (CPU) query time: {cpu_ms:.1f} ms")
 
     # Optional external reference (e.g. a precomputed tpcds_ref dir).
     extra_ref = None
@@ -280,7 +309,8 @@ def main():
     try:
         for it in range(1, args.max_iters + 1):
             print(f"\n===== iteration {it}/{args.max_iters} =====")
-            code = extract_cpp(chat(args.endpoint, model, messages, args.temperature))
+            code = extract_cpp(chat(args.endpoint, model, messages, args.temperature,
+                                    args.max_tokens, args.guided))
             GEN_FILE.write_text(code)
             (work / f"iter{it}_gen.cpp").write_text(code)  # keep every attempt
             messages.append({"role": "assistant", "content": f"```cpp\n{code}\n```"})
@@ -293,15 +323,17 @@ def main():
                 print(f"[agent] full log: {work / f'iter{it}_build.log'}  code: {work / f'iter{it}_gen.cpp'}")
                 messages.append({"role": "user", "content": "Compilation failed. Fix it. Errors:\n" + tail(log)})
                 continue
-            ok, log = run(work, args.data)
+            ok, log, gpu_ms = run(work, args.data)
             if not ok:
                 (work / f"iter{it}_run.log").write_text(log)
                 print("[agent] RUNTIME FAILED:")
                 print("\n".join(log.splitlines()[-15:]))
                 messages.append({"role": "user", "content": "Compiled but crashed. Fix it. Output:\n" + tail(log)})
                 continue
-            # Show both outputs and compare.
+            # Show both outputs, timings, and compare.
             show_parquet(work / "output.parquet", "GPU (gqe) output")
+            speedup = (cpu_ms / gpu_ms) if gpu_ms else float("nan")
+            print(f"[time] DuckDB (CPU) {cpu_ms:.1f} ms  |  GPU (gqe) {gpu_ms:.1f} ms  |  speedup {speedup:.2f}x")
             ok, detail = compare(work / "output.parquet", ref)
             print("[agent] vs DuckDB reference:", detail)
             if extra_ref and extra_ref.exists():

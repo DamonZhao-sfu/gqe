@@ -81,11 +81,21 @@ python tpch_bench/agent_gqe/gqe_codegen.py \
 
 What it prints/saves:
 - `----- DuckDB CPU output -----` and `----- GPU (gqe) output -----` (first rows of each),
+- `[time] DuckDB (CPU) X ms | GPU (gqe) Y ms | speedup Zx` (GPU = engine time from the
+  "Query execution time" log; CPU = DuckDB query time),
 - `vs DuckDB reference: MATCH/DIFFER` and `vs q<N>.parquet: ...`,
 - success → `tpch_bench/agent_gqe/solution_<label>.cpp`,
 - every attempt + logs → `tpch_bench/agent_gqe/agent_work/iter*`.
 
 `--tpch` makes the generated `main` call `register_tpch(cat,data)`; otherwise `register_tpcds`.
+
+### Forcing code-only output (reasoning models)
+Reasoning/distilled models emit `<think>…</think>` and prose. The agent already (a) strips think
+blocks, (b) takes the largest ```cpp block, (c) tolerates a truncated/unfenced reply. Extra knobs:
+- `--max-tokens 12000` — raise if a whole-file reply gets truncated (reasoning eats the budget).
+- `--guided` — vLLM guided decoding forces the reply to be exactly one ```cpp block (most robust;
+  needs a guided-decoding-capable vLLM, the default). This mirrors how BespokeOLAP/GenDB guarantee
+  code-only output via structured/tool outputs.
 
 ---
 
