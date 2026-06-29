@@ -39,12 +39,24 @@ python tpch_bench/common/gen_tpcds_data.py --sf 1 --outdir /data/tpcds_sf1
 ```
 MATCH on q3/q7/q43 means the reference + comparator are trustworthy.
 
+## Inputs (like BespokeOLAP / GenDB)
+The agent takes **data files + database schema + a SQL query** — no baseline C++:
+- **data files**: `--data <dir>` where each `<dir>/<table>/*.parquet` becomes a table.
+- **database schema**: auto-derived from the data (DuckDB views) and saved to
+  `agent_work/<label>.input.schema.txt`.
+- **SQL query**: one of `--sql "<...>"`, `--sql-file q.sql`, `--query <N>` (TPC-DS), `--tpch <N>`.
+
+From these it generates the **GQE-template plan code** (the name-based `build_plan`). The reference
+is the same SQL run in DuckDB.
+
 ## Phase 1 — run the agent
 Start with the already-implemented queries (3, 7, 43):
 ```bash
 vllm serve Qwen/Qwen2.5-Coder-7B-Instruct --port 8000     # in another shell
+# by TPC-DS number (convenience):
 python tpch_bench/agent_gqe/gqe_codegen.py --query 3 --data /data/tpcds_sf1
-python tpch_bench/agent_gqe/gqe_codegen.py --query 7 --data /data/tpcds_sf1 --max-iters 8
+# or by arbitrary SQL + your own data:
+python tpch_bench/agent_gqe/gqe_codegen.py --data /data/tpcds_sf1 --sql-file myquery.sql --name myq
 ```
 On success the winning plan is saved as `solution_qN.cpp`; the committed Q3 default in
 `build_plan_gen.cpp` is restored afterward.

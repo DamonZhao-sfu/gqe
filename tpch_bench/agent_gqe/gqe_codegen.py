@@ -64,29 +64,47 @@ def extract_cpp(text):
     return (m.group(1) if m else text).strip()
 
 
-# --------------------------------------------------------------------------- duckdb reference
+# --------------------------------------------------------------------------- inputs (schema + data)
+# INPUTS, like BespokeOLAP / GenDB: (1) data files, (2) database schema, (3) SQL query.
+# The schema is derived from the data files: every <data>/<name>/*.parquet becomes table <name>.
 def duck(data):
     import duckdb
     con = duckdb.connect()
-    con.execute("INSTALL tpcds; LOAD tpcds;")
+    for ext in ("tpcds", "tpch"):  # only needed for the --query/--tpch convenience SQL lookups
+        try:
+            con.execute(f"INSTALL {ext}; LOAD {ext};")
+        except Exception:
+            pass
     tables = []
-    for t in ["call_center", "catalog_page", "catalog_returns", "catalog_sales", "customer",
-              "customer_address", "customer_demographics", "date_dim", "household_demographics",
-              "income_band", "inventory", "item", "promotion", "reason", "ship_mode", "store",
-              "store_returns", "store_sales", "time_dim", "warehouse", "web_page", "web_returns",
-              "web_sales", "web_site"]:
-        files = sorted((Path(data) / t).glob("*.parquet"))
+    for sub in sorted(Path(data).iterdir() if Path(data).is_dir() else []):
+        if not sub.is_dir():
+            continue
+        files = sorted(sub.glob("*.parquet"))
         if files:
-            con.execute(f"CREATE OR REPLACE VIEW {t} AS SELECT * FROM read_parquet({[str(f) for f in files]})")
-            tables.append(t)
+            con.execute(f"CREATE OR REPLACE VIEW {sub.name} AS SELECT * FROM read_parquet({[str(f) for f in files]})")
+            tables.append(sub.name)
+    if not tables:
+        sys.exit(f"no <table>/*.parquet found under {data}")
     return con, tables
 
 
-def get_sql(con, n):
-    row = con.execute("SELECT query FROM tpcds_queries() WHERE query_nr = ?", [n]).fetchone()
-    if not row:
-        sys.exit(f"no TPC-DS query #{n}")
-    return row[0].strip().rstrip(";")
+# Resolve the SQL query input: explicit --sql / --sql-file, or the --query/--tpch convenience lookups.
+def resolve_sql(con, args):
+    if args.sql:
+        return args.sql.strip().rstrip(";"), (args.name or "query")
+    if args.sql_file:
+        return Path(args.sql_file).read_text().strip().rstrip(";"), (args.name or Path(args.sql_file).stem)
+    if args.query is not None:
+        row = con.execute("SELECT query FROM tpcds_queries() WHERE query_nr = ?", [args.query]).fetchone()
+        if not row:
+            sys.exit(f"no TPC-DS query #{args.query}")
+        return row[0].strip().rstrip(";"), (args.name or f"q{args.query}")
+    if args.tpch is not None:
+        row = con.execute("SELECT query FROM tpch_queries() WHERE query_nr = ?", [args.tpch]).fetchone()
+        if not row:
+            sys.exit(f"no TPC-H query #{args.tpch}")
+        return row[0].strip().rstrip(";"), (args.name or f"tpch_q{args.tpch}")
+    sys.exit("provide a SQL query: --sql '<...>' | --sql-file <path> | --query <N> | --tpch <N>")
 
 
 def schemas_for(con, tables, sql):
@@ -186,8 +204,13 @@ def tail(s, n=2000):
 # --------------------------------------------------------------------------- main
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--query", type=int, required=True)
-    ap.add_argument("--data", required=True)
+    # INPUTS: data files (--data) + database schema (auto-derived from data) + a SQL query (one of):
+    ap.add_argument("--data", required=True, help="data files dir: <data>/<table>/*.parquet")
+    ap.add_argument("--sql", default="", help="SQL query text")
+    ap.add_argument("--sql-file", dest="sql_file", default="", help="path to a .sql file")
+    ap.add_argument("--query", type=int, help="convenience: TPC-DS query number (uses duckdb tpcds)")
+    ap.add_argument("--tpch", type=int, help="convenience: TPC-H query number (uses duckdb tpch)")
+    ap.add_argument("--name", default="", help="label for outputs (default derived from the source)")
     ap.add_argument("--endpoint", default=os.environ.get("VLLM_ENDPOINT", "http://localhost:8000/v1"))
     ap.add_argument("--model", default=os.environ.get("VLLM_MODEL", ""))
     ap.add_argument("--max-iters", type=int, default=6)
@@ -196,13 +219,18 @@ def main():
     args = ap.parse_args()
 
     model = pick_model(args.endpoint, args.model)
-    print(f"[agent] endpoint={args.endpoint} model={model} TPC-DS Q{args.query}")
 
+    # Inputs: data files -> database schema (views); SQL query.
     con, tables = duck(args.data)
-    sql = get_sql(con, args.query)
+    sql, label = resolve_sql(con, args)
     schemas = schemas_for(con, tables, sql)
+    print(f"[agent] endpoint={args.endpoint} model={model} query={label}")
+
     work = Path(args.workdir); work.mkdir(parents=True, exist_ok=True)
-    ref = work / f"reference_q{args.query}.parquet"
+    # Persist the resolved inputs so the run is self-describing/reproducible.
+    (work / f"{label}.input.sql").write_text(sql + "\n")
+    (work / f"{label}.input.schema.txt").write_text(schemas + "\n")
+    ref = work / f"reference_{label}.parquet"
     print("[agent] computing DuckDB reference ...")
     con.execute(f"COPY ({sql}) TO '{ref}' (FORMAT parquet)")
 
@@ -210,7 +238,7 @@ def main():
     backup = GEN_FILE.read_text() if GEN_FILE.exists() else None
 
     messages = [{"role": "system", "content": system_prompt()},
-                {"role": "user", "content": user_prompt(args.query, sql, schemas)}]
+                {"role": "user", "content": user_prompt(label, sql, schemas)}]
     try:
         for it in range(1, args.max_iters + 1):
             print(f"\n===== iteration {it}/{args.max_iters} =====")
@@ -237,12 +265,12 @@ def main():
             ok, detail = compare(work / "output.parquet", ref)
             print("[agent] result:", detail)
             if ok:
-                sol = HERE / f"solution_q{args.query}.cpp"
+                sol = HERE / f"solution_{label}.cpp"
                 sol.write_text(code)
                 print(f"\n✅ SUCCESS iter {it}. Solution saved: {sol}")
                 return 0
             messages.append({"role": "user", "content": "Ran but wrong result vs SQL reference. Fix the plan. Diff:\n" + tail(detail)})
-        last = work / f"last_attempt_q{args.query}.cpp"
+        last = work / f"last_attempt_{label}.cpp"
         last.write_text(GEN_FILE.read_text())
         print(f"\n❌ did not converge in {args.max_iters} iters.")
         print(f"   all attempts + logs: {work}/iter*  | last attempt: {last}")
