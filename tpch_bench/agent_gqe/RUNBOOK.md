@@ -105,6 +105,26 @@ Model choice:
 
 ---
 
+## 3b. (Optional) Compare against Sirius — the open-source GPU DuckDB engine
+
+[Sirius](https://github.com/sirius-db/sirius) (Apache-2.0, NVIDIA + UW-Madison) is a GPU execution
+engine that plugs into DuckDB; queries run on GPU automatically. Install (needs
+[pixi](https://pixi.sh)):
+```bash
+git clone --recurse-submodules https://github.com/sirius-db/sirius.git
+cd sirius && pixi run make          # builds build/release/duckdb + the sirius extension
+```
+Then pass `--sirius-home` (or set `SIRIUS_HOME`) and the agent also runs the same SQL on Sirius and
+prints its GPU time + correctness:
+```bash
+python tpch_bench/agent_gqe/gqe_codegen.py --query 4 --data /localhome/hza214/gqe/tpcds_sf1 \
+  --ref-dir /localhome/hza214/gqe/tpcds_ref --sirius-home /localhome/hza214/sirius
+```
+Output adds: `[time] Sirius (GPU): Z ms (vs DuckDB reference: MATCH/DIFFER)` and the per-run summary
+becomes `DuckDB (CPU) X | GPU (gqe) Y | Sirius (GPU) Z`.
+> Sirius is a strong, optimized GPU baseline — compare your generated GPU code against it, not only
+> against DuckDB. At small scale factors all GPU engines (incl. Sirius) can lose to DuckDB.
+
 ## 4. Generate a custom fused-kernel program (q3_udr.cu style)
 
 ```bash

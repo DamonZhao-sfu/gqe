@@ -174,6 +174,36 @@ def compare(out, ref):
     return p.returncode == 0, (p.stdout + p.stderr).strip()
 
 
+def table_files(data):
+    d = {}
+    for sub in sorted(p for p in Path(data).iterdir() if p.is_dir()):
+        fs = sorted(sub.glob("*.parquet"))
+        if fs:
+            d[sub.name] = [str(f) for f in fs]
+    return d
+
+
+def run_sirius(home, data, sql, out):
+    """Run the same SQL on the open-source Sirius GPU DuckDB extension. Returns (ok, ms, log)."""
+    import time
+    home = Path(home)
+    binp = home / "build" / "release" / "duckdb"
+    ext = home / "build" / "release" / "extension" / "sirius" / "sirius.duckdb_extension"
+    if not binp.exists():
+        return False, None, f"sirius duckdb not at {binp} (build: cd {home} && pixi run make)"
+    lines = [f"LOAD '{ext}';"]
+    for name, files in table_files(data).items():
+        lines.append(f"CREATE OR REPLACE VIEW {name} AS SELECT * FROM read_parquet({files});")
+    lines += [".timer on", f"COPY ({sql}) TO '{out}' (FORMAT parquet);"]
+    script = "\n".join(lines) + "\n"
+    t0 = time.perf_counter()
+    p = subprocess.run([str(binp), "-unsigned"], input=script, capture_output=True, text=True)
+    wall_ms = (time.perf_counter() - t0) * 1000.0
+    m = re.search(r"real\s+([0-9.]+)", p.stdout + p.stderr)  # duckdb .timer: "Run Time (s): real X"
+    ms = float(m.group(1)) * 1000.0 if m else wall_ms
+    return (p.returncode == 0 and Path(out).exists()), ms, (p.stdout + p.stderr)
+
+
 def show_parquet(path, label, n=10):
     try:
         import pandas as pd, pyarrow.parquet as pq
@@ -256,6 +286,8 @@ def main():
     ap.add_argument("--ref-dir", dest="ref_dir", default="",
                     help="dir of precomputed DuckDB results (e.g. /.../tpcds_ref); compares vs <ref-dir>/q<N>.parquet")
     ap.add_argument("--ref-file", dest="ref_file", default="", help="explicit reference parquet to compare against")
+    ap.add_argument("--sirius-home", dest="sirius_home", default=os.environ.get("SIRIUS_HOME", ""),
+                    help="path to a built Sirius repo (github.com/sirius-db/sirius); also runs the query on Sirius GPU")
     ap.add_argument("--endpoint", default=os.environ.get("VLLM_ENDPOINT", "http://localhost:8000/v1"))
     ap.add_argument("--model", default=os.environ.get("VLLM_MODEL", ""))
     ap.add_argument("--max-iters", type=int, default=6)
@@ -301,6 +333,20 @@ def main():
     if extra_ref and extra_ref.exists():
         print(f"[agent] will also compare against {extra_ref}")
 
+    # Run the same query on Sirius (open-source GPU DuckDB extension) once, for a GPU baseline.
+    sirius_ms = None
+    if args.sirius_home:
+        print("[agent] running Sirius (GPU) baseline ...")
+        s_out = work / f"sirius_{label}.parquet"
+        ok_s, sirius_ms, slog = run_sirius(args.sirius_home, args.data, sql, s_out)
+        if ok_s:
+            show_parquet(s_out, "Sirius (GPU) output")
+            _, sd = compare(s_out, ref)
+            print(f"[time] Sirius (GPU): {sirius_ms:.1f} ms   (vs DuckDB reference: {sd})")
+        else:
+            print("[agent] Sirius skipped/failed:", "\n".join(slog.splitlines()[-3:]))
+            sirius_ms = None
+
     # keep a backup of the default (q3) seed so we can restore it after the run
     backup = GEN_FILE.read_text() if GEN_FILE.exists() else None
 
@@ -333,7 +379,9 @@ def main():
             # Show both outputs, timings, and compare.
             show_parquet(work / "output.parquet", "GPU (gqe) output")
             speedup = (cpu_ms / gpu_ms) if gpu_ms else float("nan")
-            print(f"[time] DuckDB (CPU) {cpu_ms:.1f} ms  |  GPU (gqe) {gpu_ms:.1f} ms  |  speedup {speedup:.2f}x")
+            sir = f"  |  Sirius (GPU) {sirius_ms:.1f} ms" if sirius_ms else ""
+            print(f"[time] DuckDB (CPU) {cpu_ms:.1f} ms  |  GPU (gqe) {gpu_ms:.1f} ms  "
+                  f"|  speedup(vs CPU) {speedup:.2f}x{sir}")
             ok, detail = compare(work / "output.parquet", ref)
             print("[agent] vs DuckDB reference:", detail)
             if extra_ref and extra_ref.exists():
