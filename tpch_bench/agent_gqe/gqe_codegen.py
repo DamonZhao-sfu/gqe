@@ -110,13 +110,14 @@ def nvcomp_ld(env):
 
 def build():
     bdir = GQE_SRC / "build"
-    # ensure the target exists (it is guarded by EXISTS in CMake; reconfigure once to pick it up)
     if not (bdir / "build.ninja").exists() and not (bdir / "Makefile").exists():
         return False, "GQE build dir not configured; run build_gqe_v2.sh first"
-    rc = subprocess.run(["cmake", str(bdir)], capture_output=True, text=True)  # reconfigure
+    # Just build the target. Ninja auto-regenerates build.ninja if a CMakeLists changed (one-time);
+    # we do NOT force a reconfigure every iteration -- that is slow and re-runs the thrift/Substrait
+    # codegen steps each time. (We only build_plan_gen.cpp, which never re-triggers configure.)
     p = subprocess.run(["cmake", "--build", str(bdir), "--target", "gqe_codegen_query",
                         "-j", str(os.cpu_count() or 4)], capture_output=True, text=True)
-    return p.returncode == 0, (rc.stdout + rc.stderr + p.stdout + p.stderr)
+    return p.returncode == 0, (p.stdout + p.stderr)
 
 
 def run(workdir, data):
