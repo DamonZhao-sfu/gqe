@@ -97,6 +97,12 @@ blocks, (b) takes the largest ```cpp block, (c) tolerates a truncated/unfenced r
   needs a guided-decoding-capable vLLM, the default). This mirrors how BespokeOLAP/GenDB guarantee
   code-only output via structured/tool outputs.
 
+Model choice:
+- **Coder models (e.g. Qwen3-Coder)** emit clean fenced code with little/no prose: just run with
+  `--temperature 0`; usually no `--guided` needed. Raise `--max-tokens` if a whole-file reply is cut.
+- **Reasoning/distilled models** emit `<think>` + prose: prefer `--guided` and a larger
+  `--max-tokens` (thinking consumes the budget).
+
 ---
 
 ## 4. Generate a custom fused-kernel program (q3_udr.cu style)
