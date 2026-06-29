@@ -16,6 +16,7 @@
 #include <gqe/task_manager_context.hpp>
 #include <gqe/utility/helpers.hpp>
 #include <gqe/utility/tpcds.hpp>
+#include <gqe/utility/tpch.hpp>
 
 #include <cudf/io/parquet.hpp>
 
@@ -31,17 +32,29 @@ inline std::size_t gqe_pool_size()
   return total_mem / 284 * 256;  // ~90% of total, 256B-aligned
 }
 
-// Register every TPC-DS table that exists under <data>/<table>/, with its full schema.
-inline void register_tpcds(gqe::catalog& cat, std::string const& data)
+// Register every table from `defs` that exists under <data>/<table>/, with its full schema.
+template <typename Defs>
+inline void register_from(gqe::catalog& cat, std::string const& data, Defs const& defs)
 {
   namespace fs = std::filesystem;
-  for (auto const& [name, def] : gqe::utility::tpcds::table_definitions()) {
+  for (auto const& [name, def] : defs) {
     if (!fs::is_directory(fs::path(data) / name)) continue;
     auto files = gqe::utility::get_parquet_files(data + "/" + name);
     if (files.empty()) continue;
     cat.register_table(name, def.columns, gqe::storage_kind::parquet_file{files},
                        gqe::partitioning_schema_kind::automatic{}, def.unique_keys);
   }
+}
+
+// Register all present TPC-DS / TPC-H tables. Call exactly ONE in main (table names overlap, e.g.
+// `customer`, with different schemas across the two benchmarks).
+inline void register_tpcds(gqe::catalog& cat, std::string const& data)
+{
+  register_from(cat, data, gqe::utility::tpcds::table_definitions());
+}
+inline void register_tpch(gqe::catalog& cat, std::string const& data)
+{
+  register_from(cat, data, gqe::utility::tpch::table_definitions());
 }
 
 // Optimize -> physical -> task graph -> execute -> write the result to `out`.

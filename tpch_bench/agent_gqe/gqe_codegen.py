@@ -169,7 +169,7 @@ DSL_CHEATSHEET = """You write a COMPLETE standalone C++ program (its own main), 
 worked example, that runs ONE TPC-DS query on the GQE engine using the name-based plan DSL.
 
 Structure of the whole file (copy the example's skeleton):
-  #include "gqe_runtime.hpp"   // gqe_pool_size(), register_tpcds(cat,data), gqe_run_and_write(tm,cat,plan)
+  #include "gqe_runtime.hpp"   // gqe_pool_size(); register_tpcds OR register_tpch (cat,data); gqe_run_and_write(tm,cat,plan)
   #include "plan_builder.hpp"  // the DSL (namespace pb)
   #include <rmm/...>; <iostream>
   int main(int argc, char** argv) {
@@ -205,9 +205,16 @@ def system_prompt():
     return DSL_CHEATSHEET + "\n\n" + example
 
 
-def user_prompt(n, sql, schemas):
-    return (f"Write the COMPLETE program (whole .cpp with main) for TPC-DS query {n}.\n\nSQL:\n{sql}\n\n"
-            f"Tables/columns available (use scan/col with these names):\n{schemas}\n\n"
+def user_prompt(n, sql, schemas, register_fn):
+    note = ""
+    if register_fn == "register_tpch":
+        note = ("\nNOTE: This is TPC-H. In main call register_tpch(cat, data) (NOT register_tpcds). "
+                "Date columns (e.g. l_shipdate) are TIMESTAMP_DAYS; build date literals with "
+                "lit<cudf::timestamp_D>(cudf::timestamp_D{cudf::duration_D{days_since_epoch}}).")
+    else:
+        note = "\nNOTE: This is TPC-DS. In main call register_tpcds(cat, data)."
+    return (f"Write the COMPLETE program (whole .cpp with main) for this query.\n\nSQL:\n{sql}\n\n"
+            f"Tables/columns available (use scan/col with these names):\n{schemas}\n{note}\n\n"
             f"Write the whole .cpp now.")
 
 
@@ -241,7 +248,8 @@ def main():
     con, tables = duck(args.data)
     sql, label = resolve_sql(con, args)
     schemas = schemas_for(con, tables, sql)
-    print(f"[agent] endpoint={args.endpoint} model={model} query={label}")
+    register_fn = "register_tpch" if args.tpch is not None else "register_tpcds"
+    print(f"[agent] endpoint={args.endpoint} model={model} query={label} ({register_fn})")
 
     work = Path(args.workdir); work.mkdir(parents=True, exist_ok=True)
     # Persist the resolved inputs so the run is self-describing/reproducible.
@@ -256,8 +264,9 @@ def main():
     extra_ref = None
     if args.ref_file:
         extra_ref = Path(args.ref_file)
-    elif args.ref_dir and args.query is not None:
-        cand = Path(args.ref_dir) / f"q{args.query}.parquet"
+    elif args.ref_dir and (args.query is not None or args.tpch is not None):
+        qn = args.query if args.query is not None else args.tpch
+        cand = Path(args.ref_dir) / f"q{qn}.parquet"
         if cand.exists():
             extra_ref = cand
     if extra_ref and extra_ref.exists():
@@ -267,7 +276,7 @@ def main():
     backup = GEN_FILE.read_text() if GEN_FILE.exists() else None
 
     messages = [{"role": "system", "content": system_prompt()},
-                {"role": "user", "content": user_prompt(label, sql, schemas)}]
+                {"role": "user", "content": user_prompt(label, sql, schemas, register_fn)}]
     try:
         for it in range(1, args.max_iters + 1):
             print(f"\n===== iteration {it}/{args.max_iters} =====")
