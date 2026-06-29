@@ -26,3 +26,4 @@ compile_commands.json
 /tpch_bench/agent_gqe/agent_work/
 /tpch_bench/agent_gqe/solution_*.cpp
 /tpcds_ref/
+/tpch_bench/agent_gqe/solution_*.cu

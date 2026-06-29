@@ -1,62 +1,76 @@
 #!/usr/bin/env python3
-"""Generate DuckDB CPU reference results for TPC-DS queries over a parquet dataset.
+"""Run TPC-H / TPC-DS queries in DuckDB over a parquet dataset and save each result locally.
 
-Registers <data>/<table>/*.parquet as DuckDB views, runs the TPC-DS query SQL from DuckDB's tpcds
-extension, and writes reference/qN.parquet. This is the ground truth the GPU output is checked against.
+These are the CPU ground-truth results the GPU output is compared against later.
+Registers <data>/<table>/*.parquet as DuckDB views, then runs the benchmark query SQL and writes
+<outdir>/qN.parquet (and <outdir>/qN.sql).
 
 Usage:
-    python gen_reference.py --data /data/tpcds_sf1 --query 3
-    python gen_reference.py --data /data/tpcds_sf1 --query all --outdir ./tpcds_ref
+    # all TPC-DS queries:
+    python gen_reference.py --bench tpcds --data /data/tpcds_sf1 --query all --outdir tpcds_ref
+    # all TPC-H queries:
+    python gen_reference.py --bench tpch  --data /data/tpch_sf1  --query all --outdir tpch_ref
+    # a single query:
+    python gen_reference.py --bench tpcds --data /data/tpcds_sf1 --query 3
 """
 import argparse
 import sys
 from pathlib import Path
 
-TPCDS_TABLES = [
-    "call_center", "catalog_page", "catalog_returns", "catalog_sales", "customer",
-    "customer_address", "customer_demographics", "date_dim", "household_demographics",
-    "income_band", "inventory", "item", "promotion", "reason", "ship_mode", "store",
-    "store_returns", "store_sales", "time_dim", "warehouse", "web_page", "web_returns",
-    "web_sales", "web_site",
-]
-
 
 def connect(data):
     import duckdb
     con = duckdb.connect()
-    con.execute("INSTALL tpcds; LOAD tpcds;")
-    for t in TPCDS_TABLES:
-        files = sorted((Path(data) / t).glob("*.parquet"))
+    for ext in ("tpch", "tpcds"):
+        try:
+            con.execute(f"INSTALL {ext}; LOAD {ext};")
+        except Exception:
+            pass
+    tables = []
+    for sub in sorted(p for p in Path(data).iterdir() if p.is_dir()):
+        files = sorted(sub.glob("*.parquet"))
         if files:
-            con.execute(f"CREATE OR REPLACE VIEW {t} AS SELECT * FROM read_parquet({[str(f) for f in files]})")
+            con.execute(f"CREATE OR REPLACE VIEW {sub.name} AS SELECT * FROM read_parquet({[str(f) for f in files]})")
+            tables.append(sub.name)
+    if not tables:
+        sys.exit(f"no <table>/*.parquet under {data}")
     return con
 
 
-def query_sql(con, n):
-    row = con.execute("SELECT query FROM tpcds_queries() WHERE query_nr = ?", [n]).fetchone()
-    if not row:
-        sys.exit(f"no TPC-DS query #{n}")
-    return row[0].strip().rstrip(";")
+def query_numbers(con, bench, which):
+    fn = "tpch_queries" if bench == "tpch" else "tpcds_queries"
+    if which != "all":
+        return [int(which)], fn
+    rows = con.execute(f"SELECT query_nr FROM {fn}() ORDER BY query_nr").fetchall()
+    return [r[0] for r in rows], fn
 
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--bench", choices=["tpch", "tpcds"], required=True)
     ap.add_argument("--data", required=True)
-    ap.add_argument("--query", required=True, help="query number or 'all'")
-    ap.add_argument("--outdir", default="./tpcds_ref")
+    ap.add_argument("--query", default="all", help="query number or 'all'")
+    ap.add_argument("--outdir", default="")
     args = ap.parse_args()
 
     con = connect(args.data)
-    out = Path(args.outdir); out.mkdir(parents=True, exist_ok=True)
-    nums = range(1, 100) if args.query == "all" else [int(args.query)]
+    nums, fn = query_numbers(con, args.bench, args.query)
+    out = Path(args.outdir or f"{args.bench}_ref"); out.mkdir(parents=True, exist_ok=True)
+
+    ok = 0
     for n in nums:
+        row = con.execute(f"SELECT query FROM {fn}() WHERE query_nr = ?", [n]).fetchone()
+        if not row:
+            print(f"[ref] {args.bench} q{n}: no such query", file=sys.stderr); continue
+        sql = row[0].strip().rstrip(";")
+        (out / f"q{n}.sql").write_text(sql + "\n")
         try:
-            sql = query_sql(con, n)
-            dest = out / f"q{n}.parquet"
-            con.execute(f"COPY ({sql}) TO '{dest}' (FORMAT parquet)")
-            print(f"[ref] wrote {dest}")
+            con.execute(f"COPY ({sql}) TO '{out / f'q{n}.parquet'}' (FORMAT parquet)")
+            print(f"[ref] wrote {out / f'q{n}.parquet'}")
+            ok += 1
         except Exception as e:
-            print(f"[ref] q{n} failed: {e}", file=sys.stderr)
+            print(f"[ref] {args.bench} q{n} failed: {str(e).splitlines()[0]}", file=sys.stderr)
+    print(f"[ref] done: {ok}/{len(nums)} results in {out}/")
     return 0
 
 
