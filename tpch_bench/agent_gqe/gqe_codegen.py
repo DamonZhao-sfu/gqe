@@ -183,7 +183,7 @@ def table_files(data):
     return d
 
 
-def run_sirius(home, data, sql, out):
+def run_sirius(home, data, sql, out, config="", gpu=""):
     """Run the same SQL on the open-source Sirius GPU DuckDB extension. Returns (ok, ms, log)."""
     import time
     home = Path(home)
@@ -199,6 +199,12 @@ def run_sirius(home, data, sql, out):
     # Run with a clean library path so the conda (gqe) libs don't shadow Sirius's own (pixi) libs.
     env = dict(os.environ)
     env.pop("LD_LIBRARY_PATH", None)
+    # Sirius reserves 95% of GPU memory at LOAD unless SIRIUS_CONFIG_FILE caps it -> set a config to
+    # avoid OOM, and/or pin a free GPU (vLLM may occupy one).
+    if config:
+        env["SIRIUS_CONFIG_FILE"] = config
+    if gpu:
+        env["CUDA_VISIBLE_DEVICES"] = gpu
     t0 = time.perf_counter()
     p = subprocess.run([str(binp), "-unsigned"], input=script, capture_output=True, text=True, env=env)
     wall_ms = (time.perf_counter() - t0) * 1000.0
@@ -291,6 +297,10 @@ def main():
     ap.add_argument("--ref-file", dest="ref_file", default="", help="explicit reference parquet to compare against")
     ap.add_argument("--sirius-home", dest="sirius_home", default=os.environ.get("SIRIUS_HOME", ""),
                     help="path to a built Sirius repo (github.com/sirius-db/sirius); also runs the query on Sirius GPU")
+    ap.add_argument("--sirius-config", dest="sirius_config", default=os.environ.get("SIRIUS_CONFIG_FILE", ""),
+                    help="Sirius YAML config (cap GPU memory; default reserves 95%% -> OOM)")
+    ap.add_argument("--sirius-gpu", dest="sirius_gpu", default="",
+                    help="GPU index for Sirius (CUDA_VISIBLE_DEVICES); use a GPU not busy with vLLM")
     ap.add_argument("--endpoint", default=os.environ.get("VLLM_ENDPOINT", "http://localhost:8000/v1"))
     ap.add_argument("--model", default=os.environ.get("VLLM_MODEL", ""))
     ap.add_argument("--max-iters", type=int, default=6)
@@ -341,7 +351,8 @@ def main():
     if args.sirius_home:
         print("[agent] running Sirius (GPU) baseline ...")
         s_out = work / f"sirius_{label}.parquet"
-        ok_s, sirius_ms, slog = run_sirius(args.sirius_home, args.data, sql, s_out)
+        ok_s, sirius_ms, slog = run_sirius(args.sirius_home, args.data, sql, s_out,
+                                           args.sirius_config, args.sirius_gpu)
         if ok_s:
             show_parquet(s_out, "Sirius (GPU) output")
             _, sd = compare(s_out, ref)

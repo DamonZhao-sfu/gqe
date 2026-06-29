@@ -125,6 +125,17 @@ becomes `DuckDB (CPU) X | GPU (gqe) Y | Sirius (GPU) Z`.
 > Sirius is a strong, optimized GPU baseline — compare your generated GPU code against it, not only
 > against DuckDB. At small scale factors all GPU engines (incl. Sirius) can lose to DuckDB.
 
+**OOM at LOAD (`bad_alloc … failed to allocate ~90 GiB`)**: Sirius reserves ~95% of GPU memory at
+load by default. Cap it with a config and pin a free GPU:
+```bash
+cp /…/sirius/test/cpp/integration/integration.yaml ~/sirius_config.yaml
+# edit memory>GPU: usage_limit_fraction (e.g. 0.3), reservation_limit_fraction (e.g. 0.4) to fit your card
+python tpch_bench/agent_gqe/gqe_codegen.py --query 4 --data /…/tpcds_sf1 --ref-dir /…/tpcds_ref \
+  --sirius-home /…/sirius --sirius-config ~/sirius_config.yaml --sirius-gpu 0
+```
+(`--sirius-config` sets `SIRIUS_CONFIG_FILE`; `--sirius-gpu` sets `CUDA_VISIBLE_DEVICES` so Sirius
+doesn't land on the GPU vLLM is using.)
+
 ## 4. Generate a custom fused-kernel program (q3_udr.cu style)
 
 ```bash
