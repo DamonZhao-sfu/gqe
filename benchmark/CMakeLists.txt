@@ -68,8 +68,9 @@ target_link_libraries(load_tpcds PUBLIC gqe)
 # Codegen-agent target: generated TPC-DS plan (tpch_bench/agent_gqe). Guarded by EXISTS so a missing
 # generated file never breaks the normal build; the agent (re)writes build_plan_gen.cpp.
 set(_gqe_codegen_dir ${CMAKE_SOURCE_DIR}/tpch_bench/agent_gqe/harness)
-if(EXISTS ${_gqe_codegen_dir}/build_plan_gen.cpp)
-  add_executable(gqe_codegen_query ${_gqe_codegen_dir}/main.cpp ${_gqe_codegen_dir}/build_plan_gen.cpp)
+# Whole-file generated query program (its own main, like q3.cpp), using the name-based DSL.
+if(EXISTS ${_gqe_codegen_dir}/gen_query.cpp)
+  add_executable(gqe_codegen_query ${_gqe_codegen_dir}/gen_query.cpp)
   target_include_directories(gqe_codegen_query PUBLIC ${CMAKE_SOURCE_DIR}/include ${_gqe_codegen_dir})
   target_link_libraries(gqe_codegen_query PUBLIC gqe)
 endif()

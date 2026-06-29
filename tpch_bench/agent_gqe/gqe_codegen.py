@@ -3,7 +3,7 @@
 DSL (plan_builder.hpp); it is compiled into the GQE engine, run, and checked vs a DuckDB reference,
 with errors fed back so the model retries.
 
-    generate build_plan_gen.cpp -> ninja gqe_codegen_query -> run -> diff vs DuckDB reference
+    generate gen_query.cpp -> ninja gqe_codegen_query -> run -> diff vs DuckDB reference
               ^                                                                  |
               +----------------------- feed back compile/run/diff error ---------+
 
@@ -29,7 +29,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 GQE_SRC = HERE.parent.parent
 HARNESS = HERE / "harness"
-GEN_FILE = HARNESS / "build_plan_gen.cpp"
+GEN_FILE = HARNESS / "gen_query.cpp"   # the whole generated program (its own main)
 FEWSHOT = HERE / "fewshot"
 CMP_PY = GQE_SRC / "tpch_bench" / "common" / "compare_parquet.py"
 
@@ -132,7 +132,7 @@ def build():
         return False, "GQE build dir not configured; run build_gqe_v2.sh first"
     # Just build the target. Ninja auto-regenerates build.ninja if a CMakeLists changed (one-time);
     # we do NOT force a reconfigure every iteration -- that is slow and re-runs the thrift/Substrait
-    # codegen steps each time. (We only build_plan_gen.cpp, which never re-triggers configure.)
+    # codegen steps each time. (We only rewrite gen_query.cpp, which never re-triggers configure.)
     p = subprocess.run(["cmake", "--build", str(bdir), "--target", "gqe_codegen_query",
                         "-j", str(os.cpu_count() or 4)], capture_output=True, text=True)
     return p.returncode == 0, (p.stdout + p.stderr)
@@ -153,48 +153,62 @@ def compare(out, ref):
     return p.returncode == 0, (p.stdout + p.stderr).strip()
 
 
+def show_parquet(path, label, n=10):
+    try:
+        import pandas as pd, pyarrow.parquet as pq
+        df = pq.read_table(str(path)).to_pandas()
+        with pd.option_context("display.max_columns", None, "display.width", 200):
+            print(f"\n----- {label}  ({df.shape[0]} rows x {df.shape[1]} cols) -----")
+            print(df.head(n).to_string(index=False))
+    except Exception as e:
+        print(f"[show] could not read {path}: {e}")
+
+
 # --------------------------------------------------------------------------- prompt
-DSL_CHEATSHEET = """You implement ONE function using the name-based plan DSL (namespace pb):
+DSL_CHEATSHEET = """You write a COMPLETE standalone C++ program (its own main), exactly like the
+worked example, that runs ONE TPC-DS query on the GQE engine using the name-based plan DSL.
 
-    pb::Rel build_plan(pb::Ctx const& c);
+Structure of the whole file (copy the example's skeleton):
+  #include "gqe_runtime.hpp"   // gqe_pool_size(), register_tpcds(cat,data), gqe_run_and_write(tm,cat,plan)
+  #include "plan_builder.hpp"  // the DSL (namespace pb)
+  #include <rmm/...>; <iostream>
+  int main(int argc, char** argv) {
+    std::string data = argv[1];
+    // RMM pool, set_current_device_resource
+    gqe::task_manager_context tm; gqe::catalog cat{&tm}; register_tpcds(cat, data);
+    pb::Ctx c{&cat}; using namespace pb;
+    /* build the plan with the DSL */
+    pb::Rel plan = ...;
+    gqe_run_and_write(tm, cat, plan);   // writes output.parquet
+  }
 
-Relations (each carries column names; reference columns BY NAME):
-  scan(c, "table", {"col1","col2",...})                 -> read those columns
-  filter(rel, <expr>, {keep...})                        -> WHERE; keep defaults to all columns
-  project(rel, {{"out", <expr>}, ...})                  -> compute/rename columns
-  join(l, r, "left_key", "right_key", gqe::join_type_type::inner, {keep...})
-        keep names resolve over [l.cols ++ r.cols]; defaults to all of both
-  aggregate(rel, {"key1",...}, { {cudf::aggregation::SUM, <expr>, "out"}, ... })
-        output columns = keys first, then the measures
-  sort(rel, {{"col", cudf::order::ASCENDING}, {"c2", cudf::order::DESCENDING}})
-  limit(rel, count, offset=0)
-
-Expressions:
+DSL relations (each carries column names; reference columns BY NAME):
+  scan(c, "table", {"col1",...})                  filter(rel, <expr>, {keep...})
+  project(rel, {{"out", <expr>}, ...})            join(l, r, "lkey", "rkey", gqe::join_type_type::inner, {keep...})
+  aggregate(rel, {"key",...}, {{cudf::aggregation::SUM, <expr>, "out"}, ...})  // keys first, then measures
+  sort(rel, {{"col", cudf::order::ASCENDING}})    limit(rel, count, offset=0)
+DSL expressions:
   col("name"), lit<int64_t>(11), lit<double>(-5), lit<std::string>("M"), lit<double>(0,true)=NULL
-  eq ne lt gt le ge  and_ or_  add sub mul div  if_else(cond, then, else)  cast(e, type)
-  join types: inner, left, left_semi, left_anti, full
+  eq ne lt gt le ge  and_ or_  add sub mul div  if_else(cond,then,else)  cast(e,type)
+  join types: inner, left, left_semi, left_anti, full ; aggs: SUM, MEAN(=AVG), MIN, MAX, COUNT_ALL, COUNT_VALID
 
 Rules:
-- Reference every column by its name; track which columns survive each step (use `keep` to drop
-  columns you no longer need, especially join keys).
-- aggregate kinds: SUM, MEAN(=AVG), MIN, MAX, COUNT_ALL, COUNT_VALID.
-- Output ONLY one complete build_plan_gen.cpp inside a single ```cpp block: it must
-  #include "build_plan.hpp" and define pb::Rel build_plan(pb::Ctx const& c). No prose.
+- Reference columns by name; track which columns survive each step (use `keep` to drop columns you
+  no longer need, especially join keys).
+- Output ONLY the complete .cpp inside ONE ```cpp block (includes + main). No prose.
 """
 
 
 def system_prompt():
-    examples = []
-    for f in [GEN_FILE, FEWSHOT / "q7_plan.cpp", FEWSHOT / "q43_plan.cpp"]:
-        if f.exists():
-            examples.append(f"// Example ({f.name}):\n{f.read_text()}")
-    return DSL_CHEATSHEET + "\n\nWorked examples:\n\n" + "\n\n".join(examples)
+    ex = (FEWSHOT / "q3_full.cpp")
+    example = f"// Worked whole-file example (q3_full.cpp):\n{ex.read_text()}" if ex.exists() else ""
+    return DSL_CHEATSHEET + "\n\n" + example
 
 
 def user_prompt(n, sql, schemas):
-    return (f"Implement TPC-DS query {n} as build_plan_gen.cpp using the DSL.\n\nSQL:\n{sql}\n\n"
+    return (f"Write the COMPLETE program (whole .cpp with main) for TPC-DS query {n}.\n\nSQL:\n{sql}\n\n"
             f"Tables/columns available (use scan/col with these names):\n{schemas}\n\n"
-            f"Write build_plan_gen.cpp now.")
+            f"Write the whole .cpp now.")
 
 
 def tail(s, n=2000):
@@ -211,6 +225,9 @@ def main():
     ap.add_argument("--query", type=int, help="convenience: TPC-DS query number (uses duckdb tpcds)")
     ap.add_argument("--tpch", type=int, help="convenience: TPC-H query number (uses duckdb tpch)")
     ap.add_argument("--name", default="", help="label for outputs (default derived from the source)")
+    ap.add_argument("--ref-dir", dest="ref_dir", default="",
+                    help="dir of precomputed DuckDB results (e.g. /.../tpcds_ref); compares vs <ref-dir>/q<N>.parquet")
+    ap.add_argument("--ref-file", dest="ref_file", default="", help="explicit reference parquet to compare against")
     ap.add_argument("--endpoint", default=os.environ.get("VLLM_ENDPOINT", "http://localhost:8000/v1"))
     ap.add_argument("--model", default=os.environ.get("VLLM_MODEL", ""))
     ap.add_argument("--max-iters", type=int, default=6)
@@ -233,6 +250,18 @@ def main():
     ref = work / f"reference_{label}.parquet"
     print("[agent] computing DuckDB reference ...")
     con.execute(f"COPY ({sql}) TO '{ref}' (FORMAT parquet)")
+    show_parquet(ref, "DuckDB CPU output")
+
+    # Optional external reference (e.g. a precomputed tpcds_ref dir).
+    extra_ref = None
+    if args.ref_file:
+        extra_ref = Path(args.ref_file)
+    elif args.ref_dir and args.query is not None:
+        cand = Path(args.ref_dir) / f"q{args.query}.parquet"
+        if cand.exists():
+            extra_ref = cand
+    if extra_ref and extra_ref.exists():
+        print(f"[agent] will also compare against {extra_ref}")
 
     # keep a backup of the default (q3) seed so we can restore it after the run
     backup = GEN_FILE.read_text() if GEN_FILE.exists() else None
@@ -244,7 +273,7 @@ def main():
             print(f"\n===== iteration {it}/{args.max_iters} =====")
             code = extract_cpp(chat(args.endpoint, model, messages, args.temperature))
             GEN_FILE.write_text(code)
-            (work / f"iter{it}_build_plan.cpp").write_text(code)  # keep every attempt
+            (work / f"iter{it}_gen.cpp").write_text(code)  # keep every attempt
             messages.append({"role": "assistant", "content": f"```cpp\n{code}\n```"})
 
             ok, log = build()
@@ -252,7 +281,7 @@ def main():
                 (work / f"iter{it}_build.log").write_text(log)
                 print("[agent] BUILD FAILED. Tail of compiler output:")
                 print("\n".join(log.splitlines()[-25:]))
-                print(f"[agent] full log: {work / f'iter{it}_build.log'}  code: {work / f'iter{it}_build_plan.cpp'}")
+                print(f"[agent] full log: {work / f'iter{it}_build.log'}  code: {work / f'iter{it}_gen.cpp'}")
                 messages.append({"role": "user", "content": "Compilation failed. Fix it. Errors:\n" + tail(log)})
                 continue
             ok, log = run(work, args.data)
@@ -262,8 +291,13 @@ def main():
                 print("\n".join(log.splitlines()[-15:]))
                 messages.append({"role": "user", "content": "Compiled but crashed. Fix it. Output:\n" + tail(log)})
                 continue
+            # Show both outputs and compare.
+            show_parquet(work / "output.parquet", "GPU (gqe) output")
             ok, detail = compare(work / "output.parquet", ref)
-            print("[agent] result:", detail)
+            print("[agent] vs DuckDB reference:", detail)
+            if extra_ref and extra_ref.exists():
+                ok2, detail2 = compare(work / "output.parquet", extra_ref)
+                print(f"[agent] vs {extra_ref.name}:", detail2)
             if ok:
                 sol = HERE / f"solution_{label}.cpp"
                 sol.write_text(code)
@@ -275,7 +309,7 @@ def main():
         print(f"\n❌ did not converge in {args.max_iters} iters.")
         print(f"   all attempts + logs: {work}/iter*  | last attempt: {last}")
         print("   TIP: first confirm the harness itself compiles with the default Q3:")
-        print("        git checkout tpch_bench/agent_gqe/harness/build_plan_gen.cpp && \\")
+        print("        git checkout tpch_bench/agent_gqe/harness/gen_query.cpp && \\")
         print("        ./tpch_bench/gqe/build_query.sh gqe_codegen_query")
         return 1
     finally:

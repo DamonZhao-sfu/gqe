@@ -46,8 +46,14 @@ The agent takes **data files + database schema + a SQL query** — no baseline C
   `agent_work/<label>.input.schema.txt`.
 - **SQL query**: one of `--sql "<...>"`, `--sql-file q.sql`, `--query <N>` (TPC-DS), `--tpch <N>`.
 
-From these it generates the **GQE-template plan code** (the name-based `build_plan`). The reference
-is the same SQL run in DuckDB.
+From these it generates a **complete GQE program** (a whole `.cpp` with its own `main`, like
+`q3.cpp` — built on the name-based DSL + `gqe_runtime.hpp` helpers). The reference is the same SQL
+run in DuckDB; the run prints the DuckDB output and the GPU output and diffs them.
+
+The generated whole file lives at `harness/gen_query.cpp` (default = Q3 smoke test; the agent
+overwrites it per run and restores the default afterward). On success it is saved as
+`solution_<label>.cpp`. To also diff against a precomputed reference dir, pass
+`--ref-dir /…/tpcds_ref` (uses `q<N>.parquet`) or `--ref-file <path>`.
 
 ## Phase 1 — run the agent
 Start with the already-implemented queries (3, 7, 43):
