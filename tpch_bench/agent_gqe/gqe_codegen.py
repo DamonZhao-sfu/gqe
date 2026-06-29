@@ -188,10 +188,11 @@ def run_sirius(home, data, sql, out, config="", gpu=""):
     import time
     home = Path(home)
     binp = home / "build" / "release" / "duckdb"
-    ext = home / "build" / "release" / "extension" / "sirius" / "sirius.duckdb_extension"
     if not binp.exists():
         return False, None, f"sirius duckdb not at {binp} (build: cd {home} && pixi run make)"
-    lines = [f"LOAD '{ext}';"]
+    # Sirius's own ./build/release/duckdb AUTO-LOADS the extension at startup (configured via
+    # SIRIUS_CONFIG_FILE); a manual LOAD would re-register and throw "gpu_execution already exists".
+    lines = []
     for name, files in table_files(data).items():
         lines.append(f"CREATE OR REPLACE VIEW {name} AS SELECT * FROM read_parquet({files});")
     lines += [".timer on", f"COPY ({sql}) TO '{out}' (FORMAT parquet);"]
